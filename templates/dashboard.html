@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+
+  <header class="dash-header">
+    <div>
+      <h1>Spending Overview</h1>
+      <p class="subtitle">
+        Current period: <strong>{{ current_month }}</strong>
+        {% if prev_month %}
+          &nbsp;•&nbsp; Compared with: <strong>{{ prev_month }}</strong>
+        {% else %}
+          &nbsp;•&nbsp; Not enough data for a previous month comparison yet.
+        {% endif %}
+      </p>
+    </div>
+    <div class="dash-pills">
+      <span class="pill">AI Budgeting</span>
+      <span class="pill">OCR from Screenshots</span>
+      <span class="pill">Real-time Category Insights</span>
+    </div>
+  </header>
+
+  <section class="kpi-row">
+    <div class="kpi-card">
+      <span class="kpi-label">Total Budget</span>
+      <span class="kpi-value">₹{{ "%.0f" | format(total_budget) }}</span>
+      <p class="kpi-caption">Sum of all category budgets configured.</p>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Spent This Period</span>
+      <span class="kpi-value">₹{{ "%.0f" | format(total_spent) }}</span>
+      <p class="kpi-caption">Total debits detected from your statements.</p>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Remaining</span>
+      <span class="kpi-value {% if total_remaining < 0 %}negative{% endif %}">
+        ₹{{ "%.0f" | format(total_remaining) }}
+      </span>
+      <p class="kpi-caption">
+        {% if total_remaining < 0 %}
+          You have exceeded your overall budget.
+        {% else %}
+          You still have room to spend within your plan.
+        {% endif %}
+      </p>
+    </div>
+  </section>
+
+  <section class="chart-row">
+    <div class="chart-card">
+      <h2>Category Share</h2>
+      <p class="small">See where most of your money is going this month.</p>
+      <canvas id="pieChart"></canvas>
+    </div>
+    <div class="chart-card">
+      <h2>Current vs Last Month</h2>
+      <p class="small">
+        Track whether you’re improving or overspending compared to the previous month.
+      </p>
+      <canvas id="compareChart"></canvas>
+    </div>
+  </section>
+
+  <section class="two-column">
+    <div class="card">
+      <h2>Category Summary &amp; Progress</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Spent</th>
+            <th>Budget</th>
+            <th>Progress</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in summary %}
+          {% set pct = (row.spent / row.budget * 100) if row.budget > 0 else 0 %}
+          <tr class="{% if row.status == 'Over budget!' %}over-budget{% elif row.status == 'Almost at limit' %}warning{% endif %}">
+            <td>{{ row.category }}</td>
+            <td>₹{{ "%.0f" | format(row.spent) }}</td>
+            <td>₹{{ "%.0f" | format(row.budget) }}</td>
+            <td>
+              <div class="progress-bar">
+                <div class="progress-fill"
+                     style="width: {{ pct if pct <= 100 else 100 }}%;">
+                </div>
+              </div>
+              <span class="progress-label">
+                {{ "%.0f" | format(pct) }}%
+              </span>
+            </td>
+            <td>{{ row.status }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>AI Suggested Budgets (Next Month)</h2>
+      <p class="small">
+        For each category, a Linear Regression model looks at your month-wise history,
+        predicts next month’s spend, and adds a small safety margin.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Suggested Budget</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for cat, value in suggested_ai.items() %}
+          <tr>
+            <td>{{ cat }}</td>
+            <td>₹{{ "%.0f" | format(value) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Transactions (Current Period)</h2>
+    <p class="small">Scroll to explore detailed line items that feed your analytics above.</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Amount</th>
+            <th>Category</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for tx in transactions %}
+          <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.description }}</td>
+            <td>₹{{ "%.0f" | format(tx.amount) }}</td>
+            <td>{{ tx.category }}</td>
+            <td>{{ tx.type if tx.type else "" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    // Pie chart
+    const pieLabels = {{ pie_labels | tojson }};
+    const pieValues = {{ pie_values | tojson }};
+
+    const pieCtx = document.getElementById('pieChart').getContext('2d');
+    new Chart(pieCtx, {
+      type: 'pie',
+      data: {
+        labels: pieLabels,
+        datasets: [{
+          data: pieValues
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'bottom'
+          }
+        }
+      }
+    });
+
+    // Comparison bar chart
+    const cmpLabels = {{ compare_labels | tojson }};
+    const cmpCurrent = {{ compare_current | tojson }};
+    const cmpPrev = {{ compare_prev | tojson }};
+
+    const cmpCtx = document.getElementById('compareChart').getContext('2d');
+    new Chart(cmpCtx, {
+      type: 'bar',
+      data: {
+        labels: cmpLabels,
+        datasets: [
+          {
+            label: 'Current Month',
+            data: cmpCurrent
+          },
+          {
+            label: 'Previous Month',
+            data: cmpPrev
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  </script>
+
+{% endblock %}

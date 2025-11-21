@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+
+  <section class="hero">
+    <h1>WELCOME TO YOUR PERSONAL FINANCE TRACKER</h1>
+    <p class="hero-sub">
+      Turn messy bank SMS screenshots into a smart, AI-powered budget dashboard in seconds.
+    </p>
+
+    <div class="hero-steps">
+      <div class="hero-step">
+        <span class="step-number">1</span>
+        <div class="step-text">
+          <h3>Import</h3>
+          <p>Upload a CSV or drop in your SMS / notification screenshots (single images or whole folders).</p>
+        </div>
+      </div>
+      <div class="hero-step">
+        <span class="step-number">2</span>
+        <div class="step-text">
+          <h3>Analyze</h3>
+          <p>We run OCR, categorize every transaction, and compare it with your monthly budgets.</p>
+        </div>
+      </div>
+      <div class="hero-step">
+        <span class="step-number">3</span>
+        <div class="step-text">
+          <h3>Plan</h3>
+          <p>See clear visuals, AI-generated budget suggestions, and get ready for the next month.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="upload-grid">
+    <section class="card">
+      <h2>Option A: Upload CSV</h2>
+      <p>Use a CSV with columns like <code>date, description, amount</code> from your bank or your own export.</p>
+      <form action="{{ url_for('index') }}" method="post" enctype="multipart/form-data" data-show-loading>
+        <input type="file" name="file" accept=".csv" required>
+        <button type="submit">Upload CSV &amp; View Dashboard</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Option B: Upload Screenshots</h2>
+      <p>
+        Upload a single PNG, multiple PNGs, or select a whole folder of SMS / app notification screenshots.
+        We’ll run OCR automatically.
+      </p>
+      <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data" data-show-loading>
+        <!-- multiple + directory / webkitdirectory allows folder selection in supported browsers -->
+        <input
+          type="file"
+          name="images"
+          accept=".png,.jpg,.jpeg"
+          multiple
+          webkitdirectory
+          directory
+          required
+        >
+        <button type="submit">Upload &amp; Analyze Screenshots</button>
+      </form>
+      <p class="small">
+        Tip: Folder upload works best in Chromium-based browsers (Chrome, Edge). Other browsers will still let you multi-select images.
+      </p>
+    </section>
+  </div>
+
+{% endblock %}

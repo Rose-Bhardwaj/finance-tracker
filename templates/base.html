@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Personal Finance Tracker</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <!-- Animated gradient background -->
+  <div class="bg-gradient"></div>
+
+  <!-- Global shell with glassmorphism -->
+  <div class="app-shell">
+    <nav class="navbar glass">
+      <div class="navbar-left">
+        <span class="logo">₹ Personal Finance Tracker</span>
+      </div>
+      <div class="navbar-right">
+        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      </div>
+    </nav>
+
+    <main class="page glass">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- Full-screen loading overlay -->
+  <div id="loading-overlay" class="loading-hidden">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p>Analyzing your finances…</p>
+      <p class="loading-sub">Running OCR and preparing your personalized dashboard.</p>
+    </div>
+  </div>
+
+  <script>
+    // Attach loading overlay to all forms with data-show-loading
+    document.addEventListener("DOMContentLoaded", function () {
+      const overlay = document.getElementById("loading-overlay");
+      document.querySelectorAll("form[data-show-loading]").forEach(form => {
+        form.addEventListener("submit", () => {
+          if (overlay) {
+            overlay.classList.remove("loading-hidden");
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>
