@@ -7,10 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <!-- Animated gradient background -->
   <div class="bg-gradient"></div>
-
-  <!-- Global shell with glassmorphism -->
   <div class="app-shell">
     <nav class="navbar glass">
       <div class="navbar-left">
@@ -19,35 +16,44 @@
       <div class="navbar-right">
         <a href="{{ url_for('index') }}">Home</a>
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('assistant') }}">AI Assistant</a>
+        <button id="modeToggle" class="mode-toggle" type="button">☾</button>
       </div>
     </nav>
+
+    <!-- Global notifications (near/over budget) -->
+    {% if notifications %}
+    <div class="notification-bar">
+      {% for note in notifications %}
+        <div class="notification">{{ note }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
 
     <main class="page glass">
       {% block content %}{% endblock %}
     </main>
   </div>
 
-  <!-- Full-screen loading overlay -->
-  <div id="loading-overlay" class="loading-hidden">
-    <div class="loading-box">
-      <div class="spinner"></div>
-      <p>Analyzing your finances…</p>
-      <p class="loading-sub">Running OCR and preparing your personalized dashboard.</p>
-    </div>
-  </div>
-
   <script>
-    // Attach loading overlay to all forms with data-show-loading
-    document.addEventListener("DOMContentLoaded", function () {
-      const overlay = document.getElementById("loading-overlay");
-      document.querySelectorAll("form[data-show-loading]").forEach(form => {
-        form.addEventListener("submit", () => {
-          if (overlay) {
-            overlay.classList.remove("loading-hidden");
-          }
+    // Dark/light mode toggle using localStorage
+    (function() {
+      const toggle = document.getElementById('modeToggle');
+      const body = document.body;
+      const saved = localStorage.getItem('pf-theme');
+      if (saved === 'light') {
+        body.classList.add('light-mode');
+        if (toggle) toggle.textContent = '☀';
+      }
+      if (toggle) {
+        toggle.addEventListener('click', () => {
+          body.classList.toggle('light-mode');
+          const isLight = body.classList.contains('light-mode');
+          toggle.textContent = isLight ? '☀' : '☾';
+          localStorage.setItem('pf-theme', isLight ? 'light' : 'dark');
         });
-      });
-    });
+      }
+    })();
   </script>
 </body>
 </html>
