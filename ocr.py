@@ -318,7 +318,80 @@ def index():
 def upload_images():
     files = request.files.getlist("images")
     if not files or files[0].filename == "":
-        return redirect(url_for("index"))
+        return redirect(url_for("index"))# ocr.py
+import base64
+import pandas as pd
+from openai import OpenAI
+
+client = OpenAI()
+
+def extract_text_from_image(image_path):
+    """Use OpenAI Vision to read text from one image."""
+    try:
+        with open(image_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Extract only the transaction text."},
+                        {"type": "input_image", "image_url": f"data:image/png;base64,{encoded}"}
+                    ],
+                }
+            ],
+        )
+
+        return response.choices[0].message["content"]
+    except Exception as e:
+        print("Vision OCR error:", e)
+        return None
+
+
+def parse_transaction_text(text):
+    """Convert raw extracted text into structured rows."""
+    import re
+
+    if text is None:
+        return None
+
+    patterns = [
+        r"₹\s?([\d,]+\.?\d*)",
+        r"Rs\.?\s?([\d,]+\.?\d*)",
+    ]
+
+    amount = None
+    for p in patterns:
+        match = re.search(p, text)
+        if match:
+            amount = float(match.group(1).replace(",", ""))
+            break
+
+    return {
+        "date": "",
+        "description": text.strip(),
+        "amount": amount or 0.0,
+        "type": "debit",
+    }
+
+
+def process_image_files(image_paths):
+    """Main function to process 1 or many images."""
+    rows = []
+
+    for path in image_paths:
+        extracted = extract_text_from_image(path)
+        parsed = parse_transaction_text(extracted)
+        if parsed:
+            rows.append(parsed)
+
+    if not rows:
+        return pd.DataFrame(columns=["date", "description", "amount", "type"])
+
+    return pd.DataFrame(rows)
+
 
     try:
         df = process_image_files(files)
