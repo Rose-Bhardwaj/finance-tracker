@@ -24,7 +24,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key-change-this"  # needed for session chat history
+app.secret_key = "super-secret-key-change-this"
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -56,22 +56,50 @@ def save_goals(goals):
         json.dump(goals, f, indent=2)
 
 
-def categorize_transaction(description: str):
-    desc = str(description).lower()
+def _normalize_desc(text: str):
+    text = str(text).lower()
+    squished = "".join(ch for ch in text if ch.isalnum())
+    return text, squished
 
-    if "rent" in desc or "landlord" in desc:
+
+def categorize_transaction(description: str):
+    """
+    Map bank SMS text -> category.
+    Improved so that DMart, Swiggy, Domino's etc are recognised.
+    """
+    desc, squished = _normalize_desc(description)
+
+    # Rent
+    if "rent" in desc:
         return "Rent"
 
-    if any(k in desc for k in ["grocery", "groceries", "dmart", "d-mart", "more", "big bazaar", "supermarket"]):
+    # Groceries / supermarkets
+    grocery_keywords = [
+        "grocery", "groceries",
+        "dmart", "d mart", "big bazaar", "bigbazaar",
+        "supermarket", "more supermarket", "reliance fresh", "hypercity",
+    ]
+    if any(k in desc for k in grocery_keywords) or "dmart" in squished:
         return "Groceries"
 
-    if any(k in desc for k in ["inox", "pvr", "movie", "cinema", "bookmyshow"]):
+    # Movies / entertainment
+    if any(k in desc for k in ["inox", "pvr", "movie", "cinema", "bookmyshow", "bms"]):
         return "Movies"
 
-    if any(k in desc for k in ["swiggy", "zomato", "restaurant", "cafe", "pizza", "burger"]):
+    # Food delivery / restaurants
+    dining_keywords = [
+        "swiggy", "zomato", "dominos", "domino's",
+        "pizza hut", "burger king", "mcdonald", "restaurant", "cafe", "eatery",
+    ]
+    if any(k in desc for k in dining_keywords):
         return "Dining Out"
 
-    if any(k in desc for k in ["amazon", "flipkart", "myntra", "ajio", "zara", "hm"]):
+    # Shopping / e-commerce
+    shopping_keywords = [
+        "amazon", "flipkart", "myntra", "ajio", "nykaa",
+        "zara", "hm", "lifestyle", "shoppers stop", "reliance trends",
+    ]
+    if any(k in desc for k in shopping_keywords):
         return "Shopping"
 
     return "Miscellaneous"
@@ -88,7 +116,6 @@ def suggest_budgets_ai(df_all: pd.DataFrame, budgets: dict):
         return {}
 
     df["year_month"] = df["date"].dt.to_period("M").astype(str)
-
     monthly = (
         df.groupby(["year_month", "category"])["amount"]
         .sum()

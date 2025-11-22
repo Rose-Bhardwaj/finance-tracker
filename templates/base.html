@@ -1,49 +1,60 @@
 <!doctype html>
 <html lang="en" data-theme="dark">
-<head>
-  <meta charset="utf-8">
-  <title>Personal Finance Tracker</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-  <div class="bg-gradient"></div>
+  <head>
+    <meta charset="utf-8">
+    <title>Personal Finance Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
+  <body>
+    <!-- animated gradient background -->
+    <div class="bg-gradient"></div>
+    <div class="bg-mouse"></div>
 
-  <div class="app-shell">
-    <nav class="navbar glass slide-down">
-      <div class="navbar-left">
-        <span class="logo">₹ Personal Finance Tracker</span>
-      </div>
-      <div class="navbar-right">
-        <a href="{{ url_for('index') }}">Home</a>
-        <a href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('assistant') }}">AI Assistant</a>
-        <button id="theme-toggle" class="theme-toggle" type="button">🌙</button>
-      </div>
-    </nav>
+    <div class="app-shell">
+      <header class="glass navbar">
+        <div class="logo">₹ PERSONAL FINANCE TRACKER</div>
+        <div class="navbar-right">
+          <a href="{{ url_for('index') }}">Home</a>
+          <a href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a href="{{ url_for('assistant') }}">AI Assistant</a>
+          <button id="theme-toggle" class="theme-toggle">🌙</button>
+        </div>
+      </header>
 
-    <main class="page glass fade-in">
-      {% block content %}{% endblock %}
-    </main>
-  </div>
+      <main class="glass page">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
 
-  <script>
-    // Dark / light theme toggle
-    const root = document.documentElement;
-    const toggle = document.getElementById("theme-toggle");
-    const savedTheme = localStorage.getItem("pf-theme");
-    if (savedTheme) {
-      root.setAttribute("data-theme", savedTheme);
-      toggle.textContent = savedTheme === "dark" ? "🌙" : "☀️";
-    }
+    <script>
+      // --- theme toggle ---
+      const root = document.documentElement;
+      const themeBtn = document.getElementById("theme-toggle");
+      const savedTheme = localStorage.getItem("theme");
+      if (savedTheme === "light" || savedTheme === "dark") {
+        root.setAttribute("data-theme", savedTheme);
+        if (themeBtn) themeBtn.textContent = savedTheme === "light" ? "☀️" : "🌙";
+      }
 
-    toggle?.addEventListener("click", () => {
-      const current = root.getAttribute("data-theme") || "dark";
-      const next = current === "dark" ? "light" : "dark";
-      root.setAttribute("data-theme", next);
-      localStorage.setItem("pf-theme", next);
-      toggle.textContent = next === "dark" ? "🌙" : "☀️";
-    });
-  </script>
-</body>
+      themeBtn?.addEventListener("click", () => {
+        const current = root.getAttribute("data-theme") || "dark";
+        const next = current === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        localStorage.setItem("theme", next);
+        themeBtn.textContent = next === "light" ? "☀️" : "🌙";
+      });
+
+      // --- mouse-follow gradient ---
+      const mouseLayer = document.querySelector(".bg-mouse");
+      window.addEventListener("mousemove", (e) => {
+        const x = (e.clientX / window.innerWidth) * 100;
+        const y = (e.clientY / window.innerHeight) * 100;
+        mouseLayer.style.setProperty("--mx", x + "%");
+        mouseLayer.style.setProperty("--my", y + "%");
+      });
+    </script>
+
+    {% block extra_scripts %}{% endblock %}
+  </body>
 </html>

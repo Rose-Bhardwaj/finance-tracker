@@ -1,165 +1,140 @@
 {% extends "base.html" %}
 {% block content %}
 
-<header class="dash-header">
-  <div>
+<div class="dash-header">
+  <div class="hero">
     <h1>Spending Overview</h1>
-    <p class="subtitle">
-      Current period: <strong>{{ current_month }}</strong>
-      {% if prev_month %}
-        &nbsp;•&nbsp; Compared with: <strong>{{ prev_month }}</strong>
-      {% else %}
-        &nbsp;•&nbsp; Not enough data for a previous month comparison yet.
-      {% endif %}
+    <p class="hero-sub">
+      Current period: {{ current_month }}{% if not prev_month %} • Not enough data for a previous month comparison yet.{% endif %}
     </p>
-  </div>
-  <div class="dash-pills">
-    <span class="pill">OCR Screenshots</span>
-    <span class="pill">AI Budget Suggestions</span>
-    <span class="pill">Goals Tracking</span>
-  </div>
-</header>
-
-{% if alerts %}
-  <div class="toast-container">
-    {% for msg in alerts %}
-      <div class="toast">
-        ⚠️ {{ msg }}
+    <div class="hero-steps">
+      <div class="hero-step">
+        <div class="step-number">1</div>
+        <div class="step-text">
+          <h3>Total Budget</h3>
+          <p>₹{{ "%.0f" | format(total_budget) }}</p>
+        </div>
       </div>
-    {% endfor %}
+      <div class="hero-step">
+        <div class="step-number">2</div>
+        <div class="step-text">
+          <h3>Spent This Period</h3>
+          <p>₹{{ "%.0f" | format(total_spent) }}</p>
+        </div>
+      </div>
+      <div class="hero-step">
+        <div class="step-number">3</div>
+        <div class="step-text">
+          <h3>Remaining</h3>
+          <p>₹{{ "%.0f" | format(total_remaining) }}</p>
+        </div>
+      </div>
+    </div>
   </div>
-{% endif %}
+</div>
 
-<section class="kpi-row">
-  <div class="kpi-card pop-in">
+<div class="kpi-row">
+  <div class="kpi-card">
     <span class="kpi-label">Total Budget</span>
     <span class="kpi-value">₹{{ "%.0f" | format(total_budget) }}</span>
     <p class="kpi-caption">Sum of all category budgets configured.</p>
   </div>
-  <div class="kpi-card pop-in delay-1">
+  <div class="kpi-card">
     <span class="kpi-label">Spent This Period</span>
     <span class="kpi-value">₹{{ "%.0f" | format(total_spent) }}</span>
     <p class="kpi-caption">Total debits detected from your statements.</p>
   </div>
-  <div class="kpi-card pop-in delay-2">
+  <div class="kpi-card">
     <span class="kpi-label">Remaining</span>
     <span class="kpi-value {% if total_remaining < 0 %}negative{% endif %}">
       ₹{{ "%.0f" | format(total_remaining) }}
     </span>
-    <p class="kpi-caption">
-      {% if total_remaining < 0 %}
-        You have exceeded your overall budget.
-      {% else %}
-        You still have room to spend within your plan.
-      {% endif %}
-    </p>
+    <p class="kpi-caption">You still have room to spend within your plan.</p>
   </div>
-</section>
+</div>
 
-<section class="chart-row">
-  <div class="chart-card slide-up">
+<div class="chart-row">
+  <div class="chart-card">
     <h2>Category Share</h2>
     <p class="small">See where most of your money is going this month.</p>
     <canvas id="pieChart"></canvas>
   </div>
-  <div class="chart-card slide-up delay-1">
+  <div class="chart-card">
     <h2>Current vs Last Month</h2>
-    <p class="small">Watch how your spending changes over time.</p>
+    <p class="small">Track whether you're improving or overspending compared to the previous month.</p>
     <canvas id="compareChart"></canvas>
   </div>
-</section>
+</div>
 
-<section class="two-column">
+<div class="two-column">
   <div class="card">
     <h2>Category Summary &amp; Progress</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Category</th>
-          <th>Spent</th>
-          <th>Budget</th>
-          <th>Progress</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for row in summary %}
-        {% set pct = (row.spent / row.budget * 100) if row.budget > 0 else 0 %}
-        <tr class="{% if row.status == 'Over budget!' %}over-budget{% elif row.status == 'Almost at limit' %}warning{% endif %}">
-          <td>{{ row.category }}</td>
-          <td>₹{{ "%.0f" | format(row.spent) }}</td>
-          <td>₹{{ "%.0f" | format(row.budget) }}</td>
-          <td>
-            <div class="progress-bar">
-              <div class="progress-fill" style="width: {{ pct if pct <= 100 else 100 }}%;"></div>
-            </div>
-            <span class="progress-label">{{ "%.0f" | format(pct) }}%</span>
-          </td>
-          <td>{{ row.status }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>AI Suggested Budgets (Next Month)</h2>
-    <p class="small">
-      A Linear Regression model looks at your month-wise history, predicts next month’s spend,
-      and adds a safety margin for each category.
-    </p>
-    <table>
-      <thead>
-        <tr>
-          <th>Category</th>
-          <th>Suggested Budget</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for cat, value in suggested_ai.items() %}
-        <tr>
-          <td>{{ cat }}</td>
-          <td>₹{{ "%.0f" | format(value) }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="two-column">
-  <div class="card">
-    <h2>Transactions (Current Period)</h2>
-    <p class="small">Scroll to explore detailed line items that feed your analytics above.</p>
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Description</th>
-            <th>Amount</th>
             <th>Category</th>
-            <th>Type</th>
+            <th>Spent</th>
+            <th>Budget</th>
+            <th>Progress</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
-        {% for tx in transactions %}
-          <tr>
-            <td>{{ tx.date }}</td>
-            <td>{{ tx.description }}</td>
-            <td>₹{{ "%.0f" | format(tx.amount) }}</td>
-            <td>{{ tx.category }}</td>
-            <td>{{ tx.type if tx.type else "" }}</td>
-          </tr>
-        {% endfor %}
+          {% for row in summary %}
+            {% set pct = (row.spent / row.budget * 100) if row.budget > 0 else 0 %}
+            <tr
+              class="
+                {% if row.status == 'Over budget!' %}over-budget{% endif %}
+                {% if row.status == 'Almost at limit' %}warning{% endif %}
+              "
+            >
+              <td>{{ row.category }}</td>
+              <td>₹{{ "%.0f" | format(row.spent) }}</td>
+              <td>₹{{ "%.0f" | format(row.budget) }}</td>
+              <td>
+                <div class="progress-bar">
+                  <div
+                    class="progress-fill"
+                    style="width: {{ pct if pct <= 100 else 100 }}%;"
+                  ></div>
+                </div>
+                <span class="progress-label">{{ "%.0f" | format(pct) }}%</span>
+              </td>
+              <td>{{ row.status }}</td>
+            </tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
 
   <div class="card">
-    <h2>Your Goals</h2>
-    <p class="small">Goals suggested by the AI assistant are saved here.</p>
+    <h2>AI Suggested Budgets (Next Month)</h2>
+    <p class="small">
+      For each category, a simple model looks at your month-wise history, predicts next month's spend,
+      and adds a margin. Treat this as a starting point.
+    </p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Suggested Budget</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat, val in suggested_ai.items() %}
+            <tr>
+              <td>{{ cat }}</td>
+              <td>₹{{ "%.0f" | format(val) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top: 16px;">Goals</h3>
     {% if goals %}
       <ul class="insights-list">
         {% for g in goals %}
@@ -167,28 +142,70 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="small">No goals yet. Ask the AI assistant to suggest some goals on the “AI Assistant” page.</p>
+      <p class="small">Ask the AI assistant to set some goals for next month.</p>
     {% endif %}
-    <a href="{{ url_for('assistant') }}" class="btn-link">Open AI Assistant →</a>
   </div>
-</section>
+</div>
 
+<div class="card" style="margin-top: 24px;">
+  <h2>Transactions (Current Period)</h2>
+  <p class="small">Scroll to explore detailed line items that feed your analytics above.</p>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Description</th>
+          <th>Amount</th>
+          <th>Category</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tx in transactions %}
+          <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.description }}</td>
+            <td>₹{{ "%.0f" | format(tx.amount) }}</td>
+            <td>{{ tx.category }}</td>
+            <td>{{ tx.type }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Notification toasts -->
+<div class="toast-container" id="toast-container">
+  {% for msg in alerts %}
+    <div class="toast">{{ msg }}</div>
+  {% endfor %}
+</div>
+
+{% block extra_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+  // Pie chart
   const pieLabels = {{ pie_labels | tojson }};
   const pieValues = {{ pie_values | tojson }};
   const pieCtx = document.getElementById('pieChart').getContext('2d');
   new Chart(pieCtx, {
-    type: 'pie',
+    type: 'doughnut',
     data: {
       labels: pieLabels,
-      datasets: [{ data: pieValues }]
+      datasets: [{
+        data: pieValues
+      }]
     },
     options: {
-      responsive: true,
-      plugins: { legend: { position: 'bottom' } }
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#e5e7eb' } }
+      }
     }
   });
 
+  // Bar chart
   const cmpLabels = {{ compare_labels | tojson }};
   const cmpCurrent = {{ compare_current | tojson }};
   const cmpPrev = {{ compare_prev | tojson }};
@@ -203,14 +220,24 @@
       ]
     },
     options: {
-      responsive: true,
-      scales: { y: { beginAtZero: true } }
+      plugins: {
+        legend: { labels: { color: '#e5e7eb' } }
+      },
+      scales: {
+        x: { ticks: { color: '#e5e7eb' } },
+        y: { ticks: { color: '#e5e7eb' } }
+      }
     }
   });
 
-  setTimeout(() => {
-    document.querySelectorAll(".toast").forEach(t => t.classList.add("toast-hide"));
-  }, 5000);
+  // Toast auto-hide
+  const toasts = document.querySelectorAll(".toast");
+  if (toasts.length > 0) {
+    setTimeout(() => {
+      toasts.forEach(t => t.classList.add("toast-hide"));
+    }, 5000);
+  }
 </script>
+{% endblock %}
 
 {% endblock %}
