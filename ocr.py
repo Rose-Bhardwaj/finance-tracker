@@ -11,14 +11,40 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 def image_file_to_data_url(file_storage):
-    """
-    Convert a Flask FileStorage image to a data URL string suitable
-    for OpenAI Vision (gpt-4o-mini).
-    """
+    """Convert a Flask FileStorage image to a data URL for OpenAI Vision."""
     img_bytes = file_storage.read()
     file_storage.stream.seek(0)
     b64 = base64.b64encode(img_bytes).decode("utf-8")
     return f"data:image/png;base64,{b64}"
+
+
+def _extract_json(raw: str):
+    """
+    Take the raw model string (which may contain ```json fences)
+    and return a parsed JSON object.
+    """
+    if not isinstance(raw, str):
+        raise ValueError("Raw response is not a string")
+
+    text = raw.strip()
+
+    # Remove ```json ... ``` fences if present
+    if text.startswith("```"):
+        # Drop first line (``` or ```json)
+        parts = text.split("\n", 1)
+        if len(parts) == 2:
+            text = parts[1]
+        # Remove trailing ```
+        if text.endswith("```"):
+            text = text.rsplit("```", 1)[0].strip()
+
+    # Now, just to be extra safe, slice between first { and last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start : end + 1]
+
+    return json.loads(text)
 
 
 def call_vision_api(data_url: str) -> dict:
@@ -39,14 +65,10 @@ Your job is to read the screenshot carefully and extract:
 
 If you truly cannot find a transaction amount (like ₹ or Rs or INR), set amount to 0.
 
-Reply ONLY as valid JSON with this exact schema:
-
-{
-  "date": "...",
-  "description": "...",
-  "amount": 123.45,
-  "type": "debit" | "credit" | ""
-}
+CRITICAL RULES:
+- Reply ONLY with raw JSON.
+- Do NOT wrap the JSON in ```json``` or any other code fences.
+- Do NOT add explanations or extra text.
 """
 
     user_content = [
@@ -64,9 +86,11 @@ Reply ONLY as valid JSON with this exact schema:
     )
 
     raw = response.choices[0].message.content
+    # print("RAW VISION REPLY:", raw)  # uncomment if you want to debug
 
     try:
-        parsed = json.loads(raw)
+        parsed = _extract_json(raw)
+
         date = parsed.get("date", "") or ""
         desc = parsed.get("description", "") or ""
         amt = parsed.get("amount", 0) or 0
@@ -83,7 +107,9 @@ Reply ONLY as valid JSON with this exact schema:
             "amount": amt,
             "type": typ,
         }
-    except Exception:
+    except Exception as e:
+        print("Vision JSON parse error:", repr(e), "RAW:", raw, flush=True)
+        # Fall back: store raw reply in description, amount=0
         return {
             "date": "",
             "description": str(raw),
@@ -109,4 +135,6 @@ def process_image_files(files):
     if not rows:
         return pd.DataFrame(columns=["date", "description", "amount", "type"])
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    print("OCR DataFrame:", df, flush=True)
+    return df

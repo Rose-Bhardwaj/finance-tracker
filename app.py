@@ -285,7 +285,6 @@ def process_transactions(csv_path: Path):
 
 @app.route("/")
 def index():
-    # Just render the welcome + screenshot upload page
     return render_template("index.html")
 
 
@@ -297,7 +296,6 @@ def upload_images():
 
     try:
         df = process_image_files(files)
-        print("OCR DataFrame:", df)
     except Exception as e:
         print("OCR error:", e, flush=True)
         return render_template(
@@ -379,11 +377,25 @@ def assistant():
     chat_history = session.get("chat_history", [])
     goals = load_goals()
 
+    quick_stats = None
+    insights = []
+    if has_data:
+        result = process_transactions(csv_path)
+        quick_stats = {
+            "total_spent": result["total_spent"],
+            "total_budget": result["total_budget"],
+            "total_remaining": result["total_remaining"],
+            "current_month": result["current_month"],
+        }
+        insights = generate_insights(result)[:3]
+
     return render_template(
         "assistant.html",
         chat_history=chat_history,
         has_data=has_data,
         goals=goals,
+        quick_stats=quick_stats,
+        insights=insights,
     )
 
 

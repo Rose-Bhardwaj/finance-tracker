@@ -1,2 +1,2 @@
-filename,date,amount,type,merchant,raw_text
-sms.png,,,unknown,02,"al Verizon &            2:16 PM                a97% a 697-87 Tet Maes dyer Sat,Feb doy onist RTR [ Your Rent the Runway order has shipped and will be delivered by 02/04! hitps:/ app linksuserorders Reply STOP to opt-out of order alerts from RTR. Yesterday (7 RTR | Your Rent the Runway order has shipped and will be delivered by 02/24! ntuios:, heap lnkvuserarders Reply STOP to opt-out of order alerts from RTR. O@~ 2 @o s"
+date,description,amount,type
+YYYY-MM-DD,Rent payment,1200.0,debit

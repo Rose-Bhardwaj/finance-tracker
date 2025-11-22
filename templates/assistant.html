@@ -16,8 +16,49 @@
   </div>
 </section>
 
-<section class="assistant-layout">
-  <div class="assistant-side card">
+<section class="assistant-grid">
+  <div class="card pop-in">
+    <h2>Spending Snapshot</h2>
+    {% if quick_stats %}
+      <div class="snapshot-kpis">
+        <div class="snapshot-item">
+          <span class="label">Month</span>
+          <span class="value">{{ quick_stats.current_month }}</span>
+        </div>
+        <div class="snapshot-item">
+          <span class="label">Spent</span>
+          <span class="value">₹{{ "%.0f" | format(quick_stats.total_spent) }}</span>
+        </div>
+        <div class="snapshot-item">
+          <span class="label">Budget</span>
+          <span class="value">₹{{ "%.0f" | format(quick_stats.total_budget) }}</span>
+        </div>
+        <div class="snapshot-item">
+          <span class="label">Remaining</span>
+          <span class="value {% if quick_stats.total_remaining < 0 %}negative{% endif %}">
+            ₹{{ "%.0f" | format(quick_stats.total_remaining) }}
+          </span>
+        </div>
+      </div>
+      <h3 style="margin-top: 16px;">Key Insights</h3>
+      {% if insights %}
+        <ul class="insights-list">
+          {% for msg in insights %}
+            <li>{{ msg }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="small">No insights yet – try asking the assistant about overspending or budget suggestions.</p>
+      {% endif %}
+    {% else %}
+      <p class="small">
+        Once you upload screenshots and view the dashboard, I’ll show a quick summary of your spending here
+        so you can see the numbers while chatting.
+      </p>
+    {% endif %}
+  </div>
+
+  <div class="card pop-in delay-1">
     <h2>Goals Panel</h2>
     <p class="small">
       Whenever the assistant suggests new goals, they will be saved here automatically.
@@ -29,7 +70,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="small">No goals yet. Ask the assistant for "goals for next month".</p>
+      <p class="small">No goals yet. Ask the assistant for “goals for next month”.</p>
     {% endif %}
   </div>
 </section>
