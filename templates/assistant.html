@@ -1,155 +1,111 @@
 {% extends "base.html" %}
 {% block content %}
 
-<section class="assistant-header">
-  <div>
+<div class="assistant-layout">
+  <!-- LEFT COLUMN: TEXT + GOALS -->
+  <div class="assistant-left">
     <h1>AI Finance Assistant</h1>
-    <p class="subtitle">
+    <p class="assistant-sub">
       Ask anything about your spending, budgets or goals. I’ll answer using your real data.
     </p>
-    {% if not has_data %}
-      <p class="small">
-        You haven't uploaded any data yet. I can still help with generic advice,
-        but for personalised answers, upload screenshots from the Home page.
-      </p>
-    {% endif %}
-  </div>
-</section>
 
-<section class="assistant-grid">
-  <div class="card pop-in">
-    <h2>Spending Snapshot</h2>
-    {% if quick_stats %}
-      <div class="snapshot-kpis">
-        <div class="snapshot-item">
-          <span class="label">Month</span>
-          <span class="value">{{ quick_stats.current_month }}</span>
-        </div>
-        <div class="snapshot-item">
-          <span class="label">Spent</span>
-          <span class="value">₹{{ "%.0f" | format(quick_stats.total_spent) }}</span>
-        </div>
-        <div class="snapshot-item">
-          <span class="label">Budget</span>
-          <span class="value">₹{{ "%.0f" | format(quick_stats.total_budget) }}</span>
-        </div>
-        <div class="snapshot-item">
-          <span class="label">Remaining</span>
-          <span class="value {% if quick_stats.total_remaining < 0 %}negative{% endif %}">
-            ₹{{ "%.0f" | format(quick_stats.total_remaining) }}
-          </span>
-        </div>
-      </div>
-      <h3 style="margin-top: 16px;">Key Insights</h3>
-      {% if insights %}
-        <ul class="insights-list">
-          {% for msg in insights %}
-            <li>{{ msg }}</li>
+    <section class="assistant-panel">
+      <h2>Spending Snapshot</h2>
+      <p>
+        Once you upload screenshots and view the dashboard, I’ll show a quick summary of your
+        spending here so you can see the numbers while chatting.
+      </p>
+      <p class="small">
+        Tip: Try questions like <em>“How much did I spend on groceries this month?”</em> or
+        <em>“Which categories am I overspending in?”</em>.
+      </p>
+    </section>
+
+    <section class="assistant-panel">
+      <h2>Goals Panel</h2>
+      <p>
+        Whenever the assistant suggests new goals, they will be saved here automatically.
+        Ask something like <em>“Set savings goals for next month”</em>.
+      </p>
+
+      {% if goals and goals|length > 0 %}
+        <ul class="goals-list">
+          {% for g in goals %}
+            <li>{{ g }}</li>
           {% endfor %}
         </ul>
       {% else %}
-        <p class="small">No insights yet – try asking the assistant about overspending or budget suggestions.</p>
+        <p class="small">No goals yet. Ask the assistant for “goals for next month”.</p>
       {% endif %}
-    {% else %}
-      <p class="small">
-        Once you upload screenshots and view the dashboard, I’ll show a quick summary of your spending here
-        so you can see the numbers while chatting.
-      </p>
-    {% endif %}
+    </section>
   </div>
 
-  <div class="card pop-in delay-1">
-    <h2>Goals Panel</h2>
-    <p class="small">
-      Whenever the assistant suggests new goals, they will be saved here automatically.
-    </p>
-    {% if goals %}
-      <ul class="insights-list">
-        {% for g in goals %}
-          <li>{{ g }}</li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="small">No goals yet. Ask the assistant for “goals for next month”.</p>
-    {% endif %}
-  </div>
-</section>
-
-<!-- Floating chat panel -->
-<div class="chat-floating">
-  <div class="chat-container glass">
-    <div class="chat-header">
-      <span>Smart Budget Chat</span>
-      <button id="chat-toggle" type="button">Collapse</button>
-    </div>
-
-    <div id="chat-body" class="chat-body">
-      {% if chat_history %}
-        {% for msg in chat_history %}
-          <div class="chat-bubble {{ 'user' if msg.role == 'user' else 'bot' }}">
-            {% if msg.role == 'user' %}
-              <strong>You:</strong> {{ msg.content }}
-            {% else %}
-              <strong>Assistant:</strong> <span class="bot-text">{{ msg.content }}</span>
-            {% endif %}
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="chat-bubble bot">
-          <strong>Assistant:</strong>
-          <span class="bot-text">
-            Hi! Ask me things like “How much did I spend on groceries?”,
-            “Which categories am I overspending in?” or
-            “Suggest a budget plan and goals for next month.”
-          </span>
-        </div>
-      {% endif %}
-    </div>
-
-    <form action="{{ url_for('ask') }}" method="post" class="chat-form">
-      <textarea
-        name="message"
-        class="chat-input"
-        placeholder="Type your question here..."
-        required
-      ></textarea>
-      <div class="chat-actions">
-        <button type="submit">Ask</button>
-        <a href="{{ url_for('clear_chat') }}" class="btn-link small">Clear chat</a>
+  <!-- RIGHT COLUMN: CHAT CARD -->
+  <div class="assistant-right">
+    <div class="chat-card" id="chatCard">
+      <div class="chat-card-header">
+        <h2>Smart Budget Chat</h2>
+        <button type="button" id="chatToggleBtn" class="pill-btn">Collapse</button>
       </div>
-    </form>
+
+      <div class="chat-card-body">
+        <div class="chat-history">
+          {% if not chat_history %}
+            <div class="msg assistant-msg">
+              <strong>Assistant:</strong>
+              Hi! Ask me things like “How much did I spend on groceries?”, “Which categories am I
+              overspending in?” or “Suggest a budget plan and goals for next month.”
+            </div>
+          {% else %}
+            {% for m in chat_history %}
+              {% if m.role == 'user' %}
+                <div class="msg user-msg">
+                  <strong>You:</strong> {{ m.content }}
+                </div>
+              {% else %}
+                <div class="msg assistant-msg">
+                  <strong>Assistant:</strong> {{ m.content }}
+                </div>
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        </div>
+
+        <form action="{{ url_for('ask') }}" method="post" class="chat-input-row">
+          <textarea
+            name="message"
+            rows="3"
+            placeholder="Type your question here..."
+            required
+          ></textarea>
+
+          <div class="chat-actions">
+            <button type="submit" class="btn-primary">Ask</button>
+            <a href="{{ url_for('clear_chat') }}" class="link-button">Clear chat</a>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 
+{% block extra_scripts %}
 <script>
-  const chatBody = document.getElementById("chat-body");
-  if (chatBody) {
-    chatBody.scrollTop = chatBody.scrollHeight;
-  }
+  document.addEventListener("DOMContentLoaded", () => {
+    const chatCard = document.getElementById("chatCard");
+    const toggleBtn = document.getElementById("chatToggleBtn");
 
-  const chatToggle = document.getElementById("chat-toggle");
-  chatToggle?.addEventListener("click", () => {
-    chatBody.classList.toggle("collapsed");
-    chatToggle.textContent = chatBody.classList.contains("collapsed") ? "Expand" : "Collapse";
+    if (!chatCard || !toggleBtn) return;
+
+    let collapsed = false;
+
+    toggleBtn.addEventListener("click", () => {
+      collapsed = !collapsed;
+      chatCard.classList.toggle("collapsed", collapsed);
+      toggleBtn.textContent = collapsed ? "Expand" : "Collapse";
+    });
   });
-
-  // typing animation for the latest bot message
-  const botTexts = document.querySelectorAll(".chat-bubble.bot .bot-text");
-  if (botTexts.length > 0) {
-    const last = botTexts[botTexts.length - 1];
-    const full = last.textContent;
-    let i = 0;
-    last.textContent = "";
-    const interval = setInterval(() => {
-      if (i >= full.length) {
-        clearInterval(interval);
-        return;
-      }
-      last.textContent += full[i];
-      i++;
-      chatBody.scrollTop = chatBody.scrollHeight;
-    }, 15);
-  }
 </script>
+{% endblock %}
 
 {% endblock %}

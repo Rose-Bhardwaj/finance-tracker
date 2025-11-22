@@ -1,69 +1,119 @@
 {% extends "base.html" %}
 {% block content %}
 
-<section class="hero">
-  <h1>PERSONAL FINANCE TRACKER</h1>
-  <p class="hero-sub">
-    A project by <strong>Rose Bhardwaj</strong>, <strong>Sanvi Kaushik</strong>,
-    <strong>Sanjusha S B</strong> and <strong>N Chiruhaas Reddy</strong>.
-  </p>
-  <p class="hero-sub">
-    Turn your messy SMS &amp; notification screenshots into a clean, AI-powered finance dashboard.
-  </p>
+<div class="dash-header">
+  <div class="hero">
+    <h1>PERSONAL FINANCE TRACKER</h1>
+    <p class="hero-sub">
+      A project by <strong>Rose Bhardwaj, Sanvi Kaushik, Sanjusha SB, N Chiruhaas Reddy</strong>.
+    </p>
+    <p class="hero-sub">
+      Upload your bank / SMS screenshots, automatically categorise your spending, and get smart budget suggestions.
+    </p>
 
-  <div class="hero-steps">
-    <div class="hero-step pop-in">
-      <span class="step-number">1</span>
-      <div class="step-text">
-        <h3>Upload</h3>
-        <p>Upload a single screenshot or an entire folder of screenshots.</p>
+    <div class="hero-steps">
+      <div class="hero-step">
+        <div class="step-number">1</div>
+        <div class="step-text">
+          <h3>Set Your Budgets</h3>
+          <p>Configure monthly limits for rent, groceries, food delivery, shopping and more.</p>
+        </div>
       </div>
-    </div>
-    <div class="hero-step pop-in delay-1">
-      <span class="step-number">2</span>
-      <div class="step-text">
-        <h3>Analyse</h3>
-        <p>We auto-categorise your spending and build visual dashboards.</p>
+      <div class="hero-step">
+        <div class="step-number">2</div>
+        <div class="step-text">
+          <h3>Upload Screenshots</h3>
+          <p>Drop a single SMS screenshot or select multiple images at once.</p>
+        </div>
       </div>
-    </div>
-    <div class="hero-step pop-in delay-2">
-      <span class="step-number">3</span>
-      <div class="step-text">
-        <h3>Plan</h3>
-        <p>Chat with the AI assistant and set clear goals for next month.</p>
+      <div class="hero-step">
+        <div class="step-number">3</div>
+        <div class="step-text">
+          <h3>View Insights</h3>
+          <p>See category-wise charts, alerts when you’re near/over budget, and AI suggestions.</p>
+        </div>
       </div>
     </div>
   </div>
-</section>
+</div>
 
-<section class="card slide-up">
-  <h2>Upload Screenshots</h2>
-  <p>
-    You can either upload <strong>a single SMS/notification screenshot</strong> or
-    <strong>an entire folder of screenshots</strong>. PNG and JPG are supported.
-  </p>
+{% if error_msg %}
+  <div class="error-message">
+    {{ error_msg }}
+  </div>
+{% endif %}
 
-  {% if ocr_error %}
-    <div class="error-message">{{ ocr_error }}</div>
-  {% endif %}
+<form
+  action="{{ url_for('index') }}"
+  method="post"
+  enctype="multipart/form-data"
+  style="margin-top: 16px;"
+>
+  <div class="two-column">
+    <!-- Left: budgets -->
+    <div class="card">
+      <h2>Monthly Budget Setup</h2>
+      <p class="small">
+        You can adjust these numbers anytime. The dashboard and alerts will use these as your targets.
+      </p>
 
-  <!-- Single screenshot upload -->
-  <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data" style="margin-bottom: 20px;">
-    <label class="upload-label">Upload a single screenshot</label>
-    <input type="file" name="images" accept=".png,.jpg,.jpeg" required>
-    <button type="submit">Upload Screenshot</button>
-  </form>
+      <div class="budget-grid">
+        {% for cat, val in budgets.items() %}
+          {% set field_name = "budget_" + cat.replace(" ", "_").lower() %}
+          <div class="budget-item">
+            <label for="{{ field_name }}" class="upload-label">{{ cat }}</label>
+            <div class="budget-input-wrapper">
+              <span class="currency-prefix">₹</span>
+              <input
+                type="number"
+                id="{{ field_name }}"
+                name="{{ field_name }}"
+                value="{{ val }}"
+                min="0"
+                step="500"
+              />
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
 
-  <!-- Folder upload -->
-  <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data">
-    <label class="upload-label">Upload a folder of screenshots</label>
-    <input type="file" name="images" accept=".png,.jpg,.jpeg" webkitdirectory directory multiple required>
-    <button type="submit">Upload Folder</button>
-  </form>
+    <!-- Right: image upload -->
+    <div class="card">
+      <h2>Upload Transaction Screenshots</h2>
+      <p class="small">
+        Supported: SMS / notification screenshots from your bank or apps like Swiggy, D-Mart, etc.
+        The app will use AI OCR to extract the amount and description.
+      </p>
 
-  <p class="small" style="margin-top: 10px;">
-    Tip: Folder upload works best on Chrome / Edge desktop. On mobile, use the single screenshot option.
-  </p>
-</section>
+      <label for="images" class="upload-label">Select screenshot(s)</label>
+      <input
+        type="file"
+        id="images"
+        name="images"
+        accept="image/png,image/jpeg,image/jpg"
+        multiple
+      />
+
+      <p class="small" style="margin-top: 8px;">
+        Tip: To simulate uploading a folder, select multiple PNG/JPEG images at once in the file picker.
+      </p>
+
+      <button type="submit" class="btn-primary">
+        🚀 Analyze Screenshots &amp; Go to Dashboard
+      </button>
+    </div>
+  </div>
+</form>
+
+<div class="card" style="margin-top: 24px;">
+  <h2>What Happens Next?</h2>
+  <ul class="insights-list">
+    <li>Your screenshots are sent to an AI Vision model to extract transaction text and amounts.</li>
+    <li>Each transaction is automatically categorised (Rent, Groceries, Swiggy, DMart, etc.).</li>
+    <li>The dashboard shows category-wise charts, current vs last month comparison, and alerts.</li>
+    <li>The AI assistant page lets you chat about your spending and set future goals.</li>
+  </ul>
+</div>
 
 {% endblock %}

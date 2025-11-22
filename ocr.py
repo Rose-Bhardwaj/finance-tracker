@@ -1,125 +1,181 @@
+import os
 import base64
 import json
-import os
+from typing import List
 
 import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# Load API key from environment
+# Make sure .env is loaded for this module too (idempotent, safe)
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def image_file_to_data_url(file_storage):
+def _encode_file_to_data_url(file_obj) -> str:
     """
-    Convert a Flask FileStorage image to a base64 data URL for Vision.
+    Read an uploaded file (PNG/JPG) and return a data URL string
+    suitable for OpenAI Vision.
     """
-    img_bytes = file_storage.read()
-    file_storage.stream.seek(0)  # reset so Flask can reuse if needed
-    b64 = base64.b64encode(img_bytes).decode("utf-8")
+    file_bytes = file_obj.read()
+
+    # reset pointer so Flask doesn't get confused later
+    try:
+        file_obj.stream.seek(0)
+    except Exception:
+        pass
+
+    b64 = base64.b64encode(file_bytes).decode("utf-8")
     return f"data:image/png;base64,{b64}"
 
 
-def call_vision_api(data_url: str) -> dict:
+def _call_vision_on_image(data_url: str) -> List[dict]:
     """
-    Call OpenAI Vision on ONE screenshot and extract ONE transaction as JSON.
+    Call OpenAI Vision on a single screenshot and return a list of
+    transaction dicts.
 
-    Returns a dict with keys:
-    - date (string, may be empty)
-    - description (short text)
-    - amount (float, INR)
-    - type ("debit" or "credit")
+    Each transaction dict should look like:
+      {
+        "date": "2025-03-10",
+        "description": "Swiggy order",
+        "amount": 499.0,
+        "type": "debit"
+      }
     """
 
-    system_prompt = """
-You are an OCR + bank SMS parser.
+    # 🔑 We create the client *inside* the function, not at import time
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("OPENAI_API_KEY missing in environment")
+        return []
 
-You are given a screenshot of an SMS or app notification describing a financial transaction
-in Indian Rupees, e.g. from a bank, card network or payment app.
+    client = OpenAI(api_key=api_key)
 
-Your job:
-- Read the screenshot carefully.
-- Extract ONE transaction (the main one, if there are multiple).
-- Return ONLY valid JSON (no markdown, no explanations) with these keys:
-
-{
-  "date": "YYYY-MM-DD or exact text like 'Yesterday' if the date is vague",
-  "description": "short human-friendly description (merchant or short sentence)",
-  "amount": 1234.56,
-  "type": "debit" or "credit"
-}
-
-Rules:
-- amount must be a number (no currency symbol) and in INR.
-- If you genuinely cannot find an amount, set "amount": 0.
-"""
-
-    user_content = [
-        {
-            "type": "text",
-            "text": "Extract the transaction from this screenshot and return ONLY JSON.",
-        },
-        {
-            "type": "image_url",
-            "image_url": {
-                "url": data_url,
-            },
-        },
-    ]
-
-    # Force valid JSON back
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        max_tokens=300,
+    system_prompt = (
+        "You are an OCR and information-extraction assistant for Indian bank and "
+        "payment SMS or notification screenshots.\n\n"
+        "Your job is to read ALL transaction-like messages in the screenshot and "
+        "return them as strict JSON.\n\n"
+        "Rules:\n"
+        "- Output a single JSON object, with a key 'transactions' that is a list.\n"
+        "- Each transaction must have exactly these keys:\n"
+        "    - 'date': the date of the transaction in ISO 'YYYY-MM-DD' if you can infer it, "
+        "             otherwise use the string 'unknown'.\n"
+        "    - 'description': short free text like 'Rent payment', 'DMart purchase', 'Swiggy order'.\n"
+        "    - 'amount': a number (float) in RUPEES, with NO currency symbol and NO commas.\n"
+        "    - 'type': 'debit' if money left the user, 'credit' if money came in.\n"
+        "- If multiple SMS messages are shown in one screenshot, extract each as its own transaction.\n"
+        "- Ignore OTP codes, order IDs and non-monetary messages.\n"
+        "- If an amount is mentioned more than once, use the actual transaction amount once.\n"
     )
 
-    raw = response.choices[0].message.content
-
-    # raw is guaranteed JSON string because of response_format
-    parsed = json.loads(raw)
-
-    date = parsed.get("date", "") or ""
-    desc = parsed.get("description", "") or ""
-    amt = parsed.get("amount", 0) or 0
-    typ = parsed.get("type", "") or ""
+    user_text = (
+        "Extract all the transactions you can see in this SMS screenshot.\n"
+        "Return ONLY JSON, no markdown, no explanation."
+    )
 
     try:
-        amt = float(amt)
-    except Exception:
-        amt = 0.0
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": data_url, "detail": "low"},
+                        },
+                    ],
+                },
+            ],
+            max_tokens=500,
+        )
+    except Exception as e:
+        print("Vision OCR API error:", repr(e))
+        return []
 
-    return {
-        "date": date,
-        "description": desc,
-        "amount": amt,
-        "type": typ,
-    }
+    try:
+        content = resp.choices[0].message.content
+        data = json.loads(content)
+    except Exception as e:
+        print("Vision JSON parse error:", repr(e))
+        return []
 
+    txs = data.get("transactions", [])
+    if not isinstance(txs, list):
+        return []
 
-def process_image_files(files):
-    """
-    Takes a list of FileStorage images from Flask upload and returns a DataFrame
-    with columns: date, description, amount, type.
-    """
-    rows = []
+    cleaned: List[dict] = []
+    for tx in txs:
+        if not isinstance(tx, dict):
+            continue
 
-    for f in files:
+        date = str(tx.get("date", "") or "").strip()
+        desc = str(tx.get("description", "") or "").strip()
+        amount = tx.get("amount", 0)
+
         try:
-            data_url = image_file_to_data_url(f)
-            tx = call_vision_api(data_url)
-            rows.append(tx)
-        except Exception as e:
-            print("Vision OCR error for one image:", repr(e), flush=True)
+            amount = float(amount)
+        except Exception:
+            # if the model gave weird non-numeric amount, skip this row
+            continue
 
-    if not rows:
+        tx_type = (tx.get("type") or "debit").strip().lower()
+        if tx_type not in ("debit", "credit"):
+            tx_type = "debit"
+
+        if not desc and amount == 0:
+            continue
+
+        cleaned.append(
+            {
+                "date": date,
+                "description": desc,
+                "amount": amount,
+                "type": tx_type,
+            }
+        )
+
+    return cleaned
+
+
+def process_image_files(files) -> pd.DataFrame:
+    """
+    Main entry point used by app.py.
+
+    files: list of uploaded image FileStorage objects
+    returns: DataFrame[date, description, amount, type]
+    """
+    all_rows: List[dict] = []
+
+    for file_obj in files:
+        try:
+            data_url = _encode_file_to_data_url(file_obj)
+            txs = _call_vision_on_image(data_url)
+            if txs:
+                print(
+                    f"Vision OCR extracted {len(txs)} transactions "
+                    f"from {getattr(file_obj, 'filename', 'image')}"
+                )
+                all_rows.extend(txs)
+            else:
+                print(
+                    "Vision OCR found NO transactions for",
+                    getattr(file_obj, "filename", "image"),
+                )
+        except Exception as e:
+            print(
+                "Error processing image file:",
+                getattr(file_obj, "filename", "image"),
+                repr(e),
+            )
+
+    if not all_rows:
         return pd.DataFrame(columns=["date", "description", "amount", "type"])
 
-    df = pd.DataFrame(rows)
-    print("OCR DataFrame:", df, flush=True)
+    df = pd.DataFrame(all_rows, columns=["date", "description", "amount", "type"])
+    print("OCR DataFrame:\n", df)
     return df

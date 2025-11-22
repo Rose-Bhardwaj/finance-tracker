@@ -1,10 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import json
 from datetime import datetime
 from pathlib import Path
+import re
 
 import pandas as pd
-from dotenv import load_dotenv
 from flask import (
     Flask,
     render_template,
@@ -21,7 +24,7 @@ from ocr import process_image_files  # OpenAI Vision OCR
 # =========================
 # Setup
 # =========================
-load_dotenv()
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
@@ -32,6 +35,7 @@ DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 TX_CSV_PATH = DATA_DIR / "transactions.csv"
 GOALS_JSON_PATH = DATA_DIR / "goals.json"
+
 
 # =========================
 # Helpers
@@ -49,17 +53,32 @@ def default_budgets():
     }
 
 
+def _fix_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Parse dates; any invalid/NaT dates are replaced with 'today'
+    so that rows are not dropped and always appear in the current month.
+    """
+    if "date" not in df.columns:
+        df["date"] = pd.Timestamp.today()
+        return df
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    # Replace NaT with today
+    today = pd.Timestamp.today().normalize()
+    df.loc[df["date"].isna(), "date"] = today
+    return df
+
+
 def load_transactions_df() -> pd.DataFrame:
     """Load all transactions from CSV if exists."""
     if TX_CSV_PATH.exists():
         df = pd.read_csv(TX_CSV_PATH)
-        # Ensure expected columns
+        # Ensure expected base columns
         for col in ["date", "description", "amount", "type"]:
             if col not in df.columns:
-                return pd.DataFrame(columns=["date", "description", "amount", "type"])
-        # Parse dates
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
+                df[col] = "" if col in ("description", "type") else 0.0
+
+        df = _fix_dates(df)
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
         df["type"] = df["type"].fillna("debit")
         return df
@@ -121,13 +140,7 @@ def build_month_comparison(transactions_df: pd.DataFrame):
     if transactions_df.empty:
         return "No data", [], [], [], False, False
 
-    df = transactions_df.copy()
-    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"])
-    if df.empty:
-        return "No data", [], [], [], False, False
-
+    df = _fix_dates(transactions_df.copy())
     df["month"] = df["date"].dt.to_period("M").astype(str)
 
     monthly_cat = (
@@ -135,6 +148,9 @@ def build_month_comparison(transactions_df: pd.DataFrame):
         .sum()
         .unstack(fill_value=0)
     )
+
+    if monthly_cat.empty:
+        return "No data", [], [], [], False, False
 
     months = sorted(monthly_cat.index)
     demo_prev = False
@@ -164,18 +180,11 @@ def build_ai_suggested_budgets(transactions_df: pd.DataFrame):
     Very simple "AI-ish" suggestion:
     - Group by month & category.
     - For each category, take the last month spend and add 10% buffer.
-    - If only one month, use that +10%.
     """
     if transactions_df.empty:
         return {}
 
-    df = transactions_df.copy()
-    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"])
-    if df.empty:
-        return {}
-
+    df = _fix_dates(transactions_df.copy())
     df["month"] = df["date"].dt.to_period("M").astype(str)
     monthly_cat = (
         df.groupby(["month", "category"])["amount"]
@@ -190,22 +199,57 @@ def build_ai_suggested_budgets(transactions_df: pd.DataFrame):
 
     suggested = {}
     for cat, val in last_row.items():
-        # add 10% buffer
-        suggested[cat] = float(round(val * 1.1, 2))
+        suggested[cat] = float(round(val * 1.1, 2))  # +10% buffer
 
     return suggested
 
 
 def extract_goals_from_text(text: str):
     """
-    Very simple heuristic: any line that starts with 'Goal:' will be stored.
+    Extract goals from the assistant's reply.
+
+    We are generous here:
+    - Lines starting with 'Goal:' or 'Goals:' (any case).
+    - Bullet / numbered lines that contain 'goal' or look like a clear target.
+
+    Returns a list of clean goal strings WITHOUT the 'Goal:' prefix.
     """
     goals = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line.lower().startswith("goal:"):
+
+    # Split into lines
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lower = line.lower()
+
+        # 1) strict 'Goal:' / 'Goals:' prefix
+        if lower.startswith("goal:"):
             goals.append(line[5:].strip())
-    return goals
+            continue
+        if lower.startswith("goals:"):
+            maybe = line[6:].strip()
+            if maybe:
+                goals.append(maybe)
+            continue
+
+        # 2) bullet or numbered list that contains 'goal' or 'target'
+        if re.match(r"^[-*•]\s+", line) or re.match(r"^\d+[\).\-\)]\s+", line):
+            # remove leading bullets / numbers
+            cleaned = re.sub(r"^([-*•]\s+|\d+[\).\-\)]\s+)", "", line).strip()
+            if "goal" in cleaned.lower() or "save" in cleaned.lower() or "spend" in cleaned.lower():
+                goals.append(cleaned)
+                continue
+
+    # normalise + deduplicate
+    final = []
+    for g in goals:
+        g_clean = g.strip()
+        if g_clean and g_clean not in final:
+            final.append(g_clean)
+
+    return final
 
 
 # =========================
@@ -236,7 +280,7 @@ def index():
         budgets = new_budgets
         session["budgets"] = budgets
 
-        # Handle image uploads (single or folder)
+        # Handle image uploads (single or multiple)
         files = request.files.getlist("images")
         files = [f for f in files if f and f.filename]
 
@@ -250,15 +294,17 @@ def index():
                 print("OCR error:", repr(e))
                 df_new = pd.DataFrame(columns=["date", "description", "amount", "type"])
 
-            if df_new.empty or df_new["amount"].fillna(0).sum() == 0:
+            if df_new.empty or "amount" not in df_new.columns or df_new["amount"].fillna(0).sum() == 0:
                 error_msg = (
                     "I couldn't detect any valid transaction amounts from these screenshots. "
                     "Try a clearer bank/SMS notification screenshot."
                 )
             else:
                 # Normalize
-                df_new["date"] = pd.to_datetime(df_new["date"], errors="coerce")
+                df_new = _fix_dates(df_new)
                 df_new["amount"] = pd.to_numeric(df_new["amount"], errors="coerce").fillna(0.0)
+                if "type" not in df_new.columns:
+                    df_new["type"] = "debit"
                 df_new["type"] = df_new["type"].fillna("debit")
 
                 # Append to stored CSV
@@ -293,7 +339,6 @@ def dashboard():
     df_all = load_transactions_df()
 
     if df_all.empty:
-        # No data at all
         summary = []
         pie_labels = []
         pie_values = []
@@ -306,12 +351,14 @@ def dashboard():
         compare_prev = []
         prev_month_exists = False
         demo_prev = False
-        total_spent = 0
-        total_budget = sum(budgets.values())
+        total_spent = 0.0
+        total_budget = float(sum(budgets.values()))
         total_remaining = total_budget
-
     else:
-        # Categorize all rows
+        # Normalize + categorize
+        df_all = _fix_dates(df_all)
+        df_all["amount"] = pd.to_numeric(df_all["amount"], errors="coerce").fillna(0.0)
+        df_all["type"] = df_all["type"].fillna("debit")
         df_all["category"] = df_all["description"].apply(categorize)
 
         # Build current vs last month comparison (uses ALL data)
@@ -345,10 +392,7 @@ def dashboard():
         for cat, budget_val in budgets.items():
             spent = float(cat_spend.get(cat, 0.0))
             remaining = budget_val - spent
-            if budget_val > 0:
-                pct = (spent / budget_val) * 100
-            else:
-                pct = 0.0
+            pct = (spent / budget_val * 100) if budget_val > 0 else 0.0
 
             if spent > budget_val:
                 status = "Over budget!"
@@ -383,7 +427,7 @@ def dashboard():
         pie_labels = list(cat_spend.keys())
         pie_values = [float(v) for v in cat_spend.values()]
 
-        # AI suggested budgets
+        # AI suggested budgets (uses all history)
         suggested_ai = build_ai_suggested_budgets(df_all)
 
         # Transactions list for current period
@@ -431,6 +475,15 @@ def assistant():
     return render_template("assistant.html", chat_history=chat_history, goals=goals)
 
 
+@app.route("/clear-chat")
+def clear_chat():
+    """
+    Clear chat history (used by the 'Clear chat' button in assistant.html).
+    """
+    session["chat_history"] = []
+    return redirect(url_for("assistant"))
+
+
 @app.route("/ask", methods=["POST"])
 def ask():
     """
@@ -448,8 +501,10 @@ def ask():
     context_lines = []
 
     if not df_all.empty:
+        df_all = _fix_dates(df_all)
+        df_all["amount"] = pd.to_numeric(df_all["amount"], errors="coerce").fillna(0.0)
         df_all["category"] = df_all["description"].apply(categorize)
-        # Use same current_month as dashboard
+
         (
             current_month_label,
             _cl,
@@ -479,10 +534,15 @@ def ask():
         {
             "role": "system",
             "content": (
-                "You are a friendly personal finance assistant for a student project. "
-                "You see approximate category spending and budgets for the current month.\n"
-                "Use this context to answer questions and suggest realistic, safe budget goals.\n"
-                "If you propose concrete goals, prefix them with 'Goal:' on separate lines so they can be saved.\n\n"
+                "You are a friendly personal finance assistant for a student project.\n"
+                "You see approximate category spending and budgets for the current month.\n\n"
+                "When you suggest concrete goals for the user, ALWAYS format them like this"
+                " on separate lines:\n"
+                "Goal: Save ₹3000 for an emergency fund.\n"
+                "Goal: Limit Swiggy orders to ₹1500 next month.\n"
+                "Goal: Reduce shopping to under ₹2000.\n\n"
+                "Do not put goals inside paragraphs; each goal should start with 'Goal:'\n"
+                "at the beginning of the line so it can be saved.\n\n"
                 f"Context:\n{context_str}"
             ),
         }
