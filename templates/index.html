@@ -4,64 +4,66 @@
 <section class="hero">
   <h1>PERSONAL FINANCE TRACKER</h1>
   <p class="hero-sub">
-    A smart budgeting project by <strong>Rose Bhardwaj</strong>, <strong>Sanvi Kaushik</strong>,
-    <strong>Sanjusha S B</strong>, and <strong>N Chiruhaas Reddy</strong>.
+    A project by <strong>Rose Bhardwaj</strong>, <strong>Sanvi Kaushik</strong>,
+    <strong>Sanjusha S B</strong> and <strong>N Chiruhaas Reddy</strong>.
+  </p>
+  <p class="hero-sub">
+    Turn your messy SMS &amp; notification screenshots into a clean, AI-powered finance dashboard.
   </p>
 
   <div class="hero-steps">
     <div class="hero-step">
       <span class="step-number">1</span>
       <div class="step-text">
-        <h3>Capture</h3>
-        <p>Upload your bank CSV or SMS/app screenshots.</p>
+        <h3>Upload</h3>
+        <p>Upload a single screenshot or an entire folder of screenshots.</p>
       </div>
     </div>
     <div class="hero-step">
       <span class="step-number">2</span>
       <div class="step-text">
-        <h3>Analyze</h3>
-        <p>We auto-categorize your spending and visualize your month.</p>
+        <h3>Analyse</h3>
+        <p>We auto-categorise your spending and build visual dashboards.</p>
       </div>
     </div>
     <div class="hero-step">
       <span class="step-number">3</span>
       <div class="step-text">
         <h3>Plan</h3>
-        <p>Our AI assistant helps you set goals and budgets for the future.</p>
+        <p>Chat with the AI assistant and set clear goals for next month.</p>
       </div>
     </div>
   </div>
 </section>
 
-<div class="upload-grid">
-  <section class="card">
-    <h2>Upload CSV</h2>
-    <p>Use a CSV file with columns like <code>date, description, amount</code>.</p>
-    <form action="{{ url_for('index') }}" method="post" enctype="multipart/form-data" data-show-loading>
-      <input type="file" name="file" accept=".csv" required>
-      <button type="submit">Upload CSV &amp; View Dashboard</button>
-    </form>
-  </section>
+<section class="card">
+  <h2>Upload Screenshots</h2>
+  <p>
+    You can either upload <strong>a single SMS/notification screenshot</strong> or
+    <strong>an entire folder of screenshots</strong>. PNG and JPG are supported.
+  </p>
 
-  <section class="card">
-    <h2>Upload Screenshots</h2>
-    <p>Upload a single PNG, multiple PNGs, or even a whole folder of SMS / app notifications.</p>
-    <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data" data-show-loading>
-      <input
-        type="file"
-        name="images"
-        accept=".png,.jpg,.jpeg"
-        multiple
-        webkitdirectory
-        directory
-        required
-      >
-      <button type="submit">Upload &amp; Analyze Screenshots</button>
-    </form>
-    <p class="small">
-      Folder upload works best in Chrome/Edge. Others still support multi-select images.
-    </p>
-  </section>
-</div>
+  {% if ocr_error %}
+    <div class="error-message">{{ ocr_error }}</div>
+  {% endif %}
+
+  <!-- Single screenshot upload -->
+  <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data" style="margin-bottom: 20px;">
+    <label class="upload-label">Upload a single screenshot</label>
+    <input type="file" name="images" accept=".png,.jpg,.jpeg" required>
+    <button type="submit">Upload Screenshot</button>
+  </form>
+
+  <!-- Folder upload -->
+  <form action="{{ url_for('upload_images') }}" method="post" enctype="multipart/form-data">
+    <label class="upload-label">Upload a folder of screenshots</label>
+    <input type="file" name="images" accept=".png,.jpg,.jpeg" webkitdirectory directory multiple required>
+    <button type="submit">Upload Folder</button>
+  </form>
+
+  <p class="small" style="margin-top: 10px;">
+    Tip: Folder upload works best on Chrome / Edge desktop. On mobile, use the single screenshot option.
+  </p>
+</section>
 
 {% endblock %}

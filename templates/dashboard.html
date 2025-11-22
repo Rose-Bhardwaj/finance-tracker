@@ -14,11 +14,21 @@
     </p>
   </div>
   <div class="dash-pills">
-    <span class="pill">AI Budgeting</span>
-    <span class="pill">OCR from Screenshots</span>
-    <span class="pill">Smart Insights</span>
+    <span class="pill">OCR Screenshots</span>
+    <span class="pill">AI Budget Suggestions</span>
+    <span class="pill">Goals Tracking</span>
   </div>
 </header>
+
+{% if alerts %}
+  <div class="toast-container">
+    {% for msg in alerts %}
+      <div class="toast">
+        ⚠️ {{ msg }}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
 
 <section class="kpi-row">
   <div class="kpi-card">
@@ -54,9 +64,7 @@
   </div>
   <div class="chart-card">
     <h2>Current vs Last Month</h2>
-    <p class="small">
-      Track whether you’re improving or overspending compared to the previous month.
-    </p>
+    <p class="small">Watch how your spending changes over time.</p>
     <canvas id="compareChart"></canvas>
   </div>
 </section>
@@ -83,13 +91,9 @@
           <td>₹{{ "%.0f" | format(row.budget) }}</td>
           <td>
             <div class="progress-bar">
-              <div class="progress-fill"
-                   style="width: {{ pct if pct <= 100 else 100 }}%;">
-              </div>
+              <div class="progress-fill" style="width: {{ pct if pct <= 100 else 100 }}%;"></div>
             </div>
-            <span class="progress-label">
-              {{ "%.0f" | format(pct) }}%
-            </span>
+            <span class="progress-label">{{ "%.0f" | format(pct) }}%</span>
           </td>
           <td>{{ row.status }}</td>
         </tr>
@@ -101,8 +105,8 @@
   <div class="card">
     <h2>AI Suggested Budgets (Next Month)</h2>
     <p class="small">
-      A Linear Regression model looks at your month-wise history,
-      predicts next month’s spend, and adds a safety margin.
+      A Linear Regression model looks at your month-wise history, predicts next month’s spend,
+      and adds a safety margin for each category.
     </p>
     <table>
       <thead>
@@ -123,43 +127,50 @@
   </div>
 </section>
 
-<section class="card">
-  <h2>Transactions (Current Period)</h2>
-  <p class="small">Scroll to explore detailed line items that feed your analytics above.</p>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Description</th>
-          <th>Amount</th>
-          <th>Category</th>
-          <th>Type</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for tx in transactions %}
-        <tr>
-          <td>{{ tx.date }}</td>
-          <td>{{ tx.description }}</td>
-          <td>₹{{ "%.0f" | format(tx.amount) }}</td>
-          <td>{{ tx.category }}</td>
-          <td>{{ tx.type if tx.type else "" }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+<section class="two-column">
+  <div class="card">
+    <h2>Transactions (Current Period)</h2>
+    <p class="small">Scroll to explore detailed line items that feed your analytics above.</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Amount</th>
+            <th>Category</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for tx in transactions %}
+          <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.description }}</td>
+            <td>₹{{ "%.0f" | format(tx.amount) }}</td>
+            <td>{{ tx.category }}</td>
+            <td>{{ tx.type if tx.type else "" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-</section>
 
-<section class="card">
-  <h2>Smart Insights</h2>
-  <p class="small">Automatically generated observations about your spending pattern.</p>
-  <ul class="insights-list">
-    {% for line in insights %}
-      <li>{{ line }}</li>
-    {% endfor %}
-  </ul>
+  <div class="card">
+    <h2>Your Goals</h2>
+    <p class="small">Goals suggested by the AI assistant are saved here.</p>
+    {% if goals %}
+      <ul class="insights-list">
+        {% for g in goals %}
+          <li>{{ g }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="small">No goals yet. Ask the AI assistant to suggest some goals on the “AI Assistant” page.</p>
+    {% endif %}
+    <a href="{{ url_for('assistant') }}" class="btn-link">Open AI Assistant →</a>
+  </div>
 </section>
 
 <script>
@@ -170,21 +181,11 @@
     type: 'pie',
     data: {
       labels: pieLabels,
-      datasets: [{
-        data: pieValues
-      }]
+      datasets: [{ data: pieValues }]
     },
     options: {
       responsive: true,
-      animation: {
-        duration: 1200,
-        easing: 'easeOutQuart'
-      },
-      plugins: {
-        legend: {
-          position: 'bottom'
-        }
-      }
+      plugins: { legend: { position: 'bottom' } }
     }
   });
 
@@ -203,13 +204,13 @@
     },
     options: {
       responsive: true,
-      animation: {
-        duration: 1200,
-        easing: 'easeOutQuart'
-      },
       scales: { y: { beginAtZero: true } }
     }
   });
+
+  setTimeout(() => {
+    document.querySelectorAll(".toast").forEach(t => t.classList.add("toast-hide"));
+  }, 5000);
 </script>
 
 {% endblock %}

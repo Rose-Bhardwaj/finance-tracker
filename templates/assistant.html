@@ -1,145 +1,112 @@
 {% extends "base.html" %}
 {% block content %}
 
-<header class="dash-header">
+<section class="assistant-header">
   <div>
     <h1>AI Finance Assistant</h1>
     <p class="subtitle">
-      Chat with your personal budgeting agent, and track your goals.
+      Ask anything about your spending, budgets or goals. I’ll answer using your real data.
     </p>
-  </div>
-</header>
-
-<section class="two-column">
-  <div class="card">
-    <h2>Goals</h2>
-    <p class="small">
-      These are long-term or monthly goals the assistant (or you) have set.
-      Tick them off as you complete them.
-    </p>
-    <ul class="goals-list">
-      {% for goal in goals %}
-        <li class="{{ 'goal-done' if goal.status == 'done' else '' }}">
-          <form action="{{ url_for('toggle_goal') }}" method="post" class="goal-row">
-            <input type="hidden" name="index" value="{{ loop.index0 }}">
-            <button type="submit" class="goal-toggle">
-              {% if goal.status == 'done' %}✔{% else %}○{% endif %}
-            </button>
-            <span>{{ goal.text }}</span>
-          </form>
-        </li>
-      {% endfor %}
-      {% if goals|length == 0 %}
-        <li class="small">No goals yet. Ask the assistant for suggestions like “Give me 3 budget goals for next month.”</li>
-      {% endif %}
-    </ul>
-
-    <form action="{{ url_for('add_goal') }}" method="post" class="add-goal-form">
-      <input
-        type="text"
-        name="goal_text"
-        placeholder="Add a custom goal (optional)…"
-        class="goal-input"
-      >
-      <button type="submit">Add Goal</button>
-    </form>
-
-    <form action="{{ url_for('clear_goals') }}" method="post" class="clear-goals-form">
-      <button type="submit" class="clear-btn">Clear All Goals</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2>Insights Snapshot</h2>
-    <p class="small">A quick reminder of what your data currently looks like.</p>
-    <ul class="insights-list">
-      {% for line in insights %}
-        <li>{{ line }}</li>
-      {% endfor %}
-    </ul>
+    {% if not has_data %}
+      <p class="small">
+        You haven't uploaded any data yet. I can still help with generic advice,
+        but for personalised answers, upload CSV/screenshots from the Home page.
+      </p>
+    {% endif %}
   </div>
 </section>
 
-<!-- Floating chat widget -->
-<div class="chat-toggle" onclick="toggleChat()">💬</div>
+<section class="assistant-layout">
+  <div class="assistant-main">
+    <div class="chat-container">
+      <div class="chat-header">
+        <span>Smart Budget Chat</span>
+        <button id="chat-toggle" type="button">Collapse</button>
+      </div>
 
-<div id="chatWindow" class="chat-window">
-  <div class="chat-header">
-    <span>Finance Assistant</span>
-    <button type="button" class="chat-close" onclick="toggleChat()">–</button>
+      <div id="chat-body" class="chat-body">
+        {% if chat_history %}
+          {% for msg in chat_history %}
+            <div class="chat-bubble {{ 'user' if msg.role == 'user' else 'bot' }}">
+              {% if msg.role == 'user' %}
+                <strong>You:</strong> {{ msg.content }}
+              {% else %}
+                <strong>Assistant:</strong> <span class="bot-text">{{ msg.content }}</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="chat-bubble bot">
+            <strong>Assistant:</strong>
+            <span class="bot-text">
+              Hi! Ask me things like “How much did I spend on groceries?”,
+              “Which categories am I overspending in?” or
+              “Suggest a budget plan and goals for next month.”
+            </span>
+          </div>
+        {% endif %}
+      </div>
+
+      <form action="{{ url_for('ask') }}" method="post" class="chat-form">
+        <textarea
+          name="message"
+          class="chat-input"
+          placeholder="Type your question here..."
+          required
+        ></textarea>
+        <div class="chat-actions">
+          <button type="submit">Ask</button>
+          <a href="{{ url_for('clear_chat') }}" class="btn-link small">Clear chat</a>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <div id="chatBody" class="chat-body">
-    {% if chat_history %}
-      {% for msg in chat_history %}
-        {% if msg.role == 'user' %}
-          <div class="chat-bubble user">
-            <span>{{ msg.content }}</span>
-          </div>
-        {% else %}
-          {% if loop.last %}
-            <div class="chat-bubble bot assistant-message" data-text="{{ msg.content|e }}">
-              <!-- text will be filled by typing effect -->
-            </div>
-          {% else %}
-            <div class="chat-bubble bot">
-              <span>{{ msg.content }}</span>
-            </div>
-          {% endif %}
-        {% endif %}
-      {% endfor %}
+  <div class="assistant-side card">
+    <h2>Goals Panel</h2>
+    <p class="small">
+      Whenever the assistant suggests new goals, they will be saved here automatically.
+    </p>
+    {% if goals %}
+      <ul class="insights-list">
+        {% for g in goals %}
+          <li>{{ g }}</li>
+        {% endfor %}
+      </ul>
     {% else %}
-      <div class="chat-bubble bot">
-        <span>
-          Hi! Upload your data, then ask me things like:
-          “How much did I spend on groceries?”, “Which categories am I overspending in?”,
-          or “Set 3 savings goals for next month.”
-        </span>
-      </div>
+      <p class="small">No goals yet. Ask the assistant for "goals for next month".</p>
     {% endif %}
   </div>
-
-  <form action="{{ url_for('assistant_ask') }}" method="post" class="chat-input-row">
-    <textarea
-      name="message"
-      class="chat-input"
-      placeholder="Ask your finance assistant…"
-      required
-    ></textarea>
-    <button type="submit">Send</button>
-  </form>
-</div>
+</section>
 
 <script>
-  // Expand / collapse chat
-  function toggleChat() {
-    const win = document.getElementById('chatWindow');
-    win.classList.toggle('chat-hidden');
+  const chatBody = document.getElementById("chat-body");
+  if (chatBody) {
+    chatBody.scrollTop = chatBody.scrollHeight;
   }
 
-  // Auto-open chat if there is history
-  window.addEventListener('load', () => {
-    const chatBody = document.getElementById('chatBody');
-    if (chatBody && chatBody.children.length > 0) {
-      document.getElementById('chatWindow').classList.remove('chat-hidden');
-      chatBody.scrollTop = chatBody.scrollHeight;
-    }
-
-    // Typing effect for latest assistant message
-    const msgEl = document.querySelector('.assistant-message');
-    if (msgEl) {
-      const fullText = msgEl.getAttribute('data-text') || '';
-      msgEl.textContent = '';
-      let i = 0;
-      const interval = setInterval(() => {
-        msgEl.textContent = fullText.slice(0, i);
-        i++;
-        if (i > fullText.length) clearInterval(interval);
-        const chatBody = document.getElementById('chatBody');
-        if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
-      }, 20);
-    }
+  const chatToggle = document.getElementById("chat-toggle");
+  chatToggle?.addEventListener("click", () => {
+    chatBody.classList.toggle("collapsed");
+    chatToggle.textContent = chatBody.classList.contains("collapsed") ? "Expand" : "Collapse";
   });
+
+  const botTexts = document.querySelectorAll(".chat-bubble.bot .bot-text");
+  if (botTexts.length > 0) {
+    const last = botTexts[botTexts.length - 1];
+    const full = last.textContent;
+    let i = 0;
+    last.textContent = "";
+    const interval = setInterval(() => {
+      if (i >= full.length) {
+        clearInterval(interval);
+        return;
+      }
+      last.textContent += full[i];
+      i++;
+      chatBody.scrollTop = chatBody.scrollHeight;
+    }, 15);
+  }
 </script>
 
 {% endblock %}

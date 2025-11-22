@@ -570,3 +570,19 @@ body.light-mode .mode-toggle {
   background: #e5e7eb;
   color: #111827;
 }
+
+.upload-label {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.error-message {
+  background-color: #ff5c5c;
+  color: #ffffff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}

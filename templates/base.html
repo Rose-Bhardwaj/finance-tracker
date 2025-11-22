@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <title>Personal Finance Tracker</title>
@@ -8,6 +8,7 @@
 </head>
 <body>
   <div class="bg-gradient"></div>
+
   <div class="app-shell">
     <nav class="navbar glass">
       <div class="navbar-left">
@@ -17,18 +18,9 @@
         <a href="{{ url_for('index') }}">Home</a>
         <a href="{{ url_for('dashboard') }}">Dashboard</a>
         <a href="{{ url_for('assistant') }}">AI Assistant</a>
-        <button id="modeToggle" class="mode-toggle" type="button">☾</button>
+        <button id="theme-toggle" class="theme-toggle" type="button">🌙</button>
       </div>
     </nav>
-
-    <!-- Global notifications (near/over budget) -->
-    {% if notifications %}
-    <div class="notification-bar">
-      {% for note in notifications %}
-        <div class="notification">{{ note }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
 
     <main class="page glass">
       {% block content %}{% endblock %}
@@ -36,24 +28,21 @@
   </div>
 
   <script>
-    // Dark/light mode toggle using localStorage
-    (function() {
-      const toggle = document.getElementById('modeToggle');
-      const body = document.body;
-      const saved = localStorage.getItem('pf-theme');
-      if (saved === 'light') {
-        body.classList.add('light-mode');
-        if (toggle) toggle.textContent = '☀';
-      }
-      if (toggle) {
-        toggle.addEventListener('click', () => {
-          body.classList.toggle('light-mode');
-          const isLight = body.classList.contains('light-mode');
-          toggle.textContent = isLight ? '☀' : '☾';
-          localStorage.setItem('pf-theme', isLight ? 'light' : 'dark');
-        });
-      }
-    })();
+    const root = document.documentElement;
+    const toggle = document.getElementById("theme-toggle");
+    const savedTheme = localStorage.getItem("pf-theme");
+    if (savedTheme) {
+      root.setAttribute("data-theme", savedTheme);
+      toggle.textContent = savedTheme === "dark" ? "🌙" : "☀️";
+    }
+
+    toggle?.addEventListener("click", () => {
+      const current = root.getAttribute("data-theme") || "dark";
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("pf-theme", next);
+      toggle.textContent = next === "dark" ? "🌙" : "☀️";
+    });
   </script>
 </body>
 </html>

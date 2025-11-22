@@ -1,7 +1,3 @@
-import os
-import json
-from pathlib import Path
-
 from flask import (
     Flask,
     render_template,
@@ -10,15 +6,26 @@ from flask import (
     url_for,
     session,
 )
+import json
+from pathlib import Path
+import os
+
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-from ocr import process_image_files
+from ocr import process_image_files  # OpenAI Vision OCR
 
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# ========= Setup =========
+# ------------ Setup ------------
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+app = Flask(__name__)
+app.secret_key = "super-secret-key-change-this"  # needed for session chat history
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -26,14 +33,9 @@ DATA_DIR.mkdir(exist_ok=True)
 BUDGETS_PATH = BASE_DIR / "budgets.json"
 GOALS_PATH = BASE_DIR / "goals.json"
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
+# ------------ Helpers ------------
 
-
-# ========= Helpers: Budgets & Goals =========
 def load_budgets():
     with open(BUDGETS_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -43,7 +45,10 @@ def load_goals():
     if not GOALS_PATH.exists():
         return []
     with open(GOALS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except Exception:
+            return []
 
 
 def save_goals(goals):
@@ -51,7 +56,6 @@ def save_goals(goals):
         json.dump(goals, f, indent=2)
 
 
-# ========= Categorization =========
 def categorize_transaction(description: str):
     desc = str(description).lower()
 
@@ -73,7 +77,6 @@ def categorize_transaction(description: str):
     return "Miscellaneous"
 
 
-# ========= Budget suggestion (ML) =========
 def suggest_budgets_ai(df_all: pd.DataFrame, budgets: dict):
     df = df_all.copy()
 
@@ -110,6 +113,7 @@ def suggest_budgets_ai(df_all: pd.DataFrame, budgets: dict):
             latest_spent = float(cat_history["spent"].iloc[-1])
             current_budget = float(budgets.get(cat, 0))
             suggested_budget = round(max(current_budget, latest_spent * 1.1))
+
         suggested[cat] = suggested_budget
 
     for cat in df["category"].unique():
@@ -121,7 +125,6 @@ def suggest_budgets_ai(df_all: pd.DataFrame, budgets: dict):
     return suggested
 
 
-# ========= Insights & notifications =========
 def generate_insights(result):
     summary_current = result["summary_current"]
     summary_prev = result["summary_prev"]
@@ -132,22 +135,25 @@ def generate_insights(result):
     if not overspent.empty:
         cats = ", ".join(overspent["category"])
         insights.append(
-            f"You are over budget in: {cats}. Try reducing discretionary spend or adjusting budgets."
+            f"You are currently over budget in: {cats}. "
+            f"Try reducing discretionary spend here or increasing the budget if these are essentials."
         )
     else:
         insights.append(
-            "You are within budget in all configured categories right now. Nice control over your spending!"
+            "You are within budget in all configured categories right now. "
+            "Nice control over your spending!"
         )
 
     almost = summary_current[
         (summary_current["budget"] > 0)
-        & (summary_current["spent"] / summary_current["budget"] >= 0.8)
+        & (summary_current["spent"] / summary_current["budget"] >= 0.9)
         & (summary_current["spent"] <= summary_current["budget"])
     ]
     if not almost.empty:
         names = ", ".join(almost["category"])
         insights.append(
-            f"You're close to your budget limit for: {names}. Slow down spending there for the rest of the month."
+            f"You're very close to your budget limit for: {names}. "
+            f"Be extra careful with these for the rest of the month."
         )
 
     if not summary_current.empty:
@@ -157,7 +163,6 @@ def generate_insights(result):
             f"at roughly ₹{int(top_row['spent'])}."
         )
 
-    summary_prev = result["summary_prev"]
     if summary_prev is not None and not summary_prev.empty:
         merged = summary_current.merge(
             summary_prev,
@@ -174,41 +179,9 @@ def generate_insights(result):
                 f"increased by about ₹{int(most_increased['delta'])}."
             )
 
-    under = summary_current[
-        (summary_current["budget"] > 0)
-        & (summary_current["spent"] / summary_current["budget"] < 0.4)
-    ]
-    if not under.empty:
-        cats = ", ".join(under["category"].head(3))
-        insights.append(
-            f"You are using less than 40% of the budget in: {cats}. "
-            f"Consider reallocating some of that to savings or other goals."
-        )
-
     return insights
 
 
-def generate_notifications(summary_current):
-    """Return list of warning strings for near/over budget."""
-    notes = []
-    for _, row in summary_current.iterrows():
-        if row["budget"] <= 0:
-            continue
-        ratio = row["spent"] / row["budget"]
-        if ratio >= 1.0:
-            notes.append(
-                f"⚠ You exceeded your {row['category']} budget "
-                f"({int(row['spent'])} / {int(row['budget'])})."
-            )
-        elif ratio >= 0.9:
-            notes.append(
-                f"⚠ You are nearing your {row['category']} budget "
-                f"({int(ratio * 100)}% used)."
-            )
-    return notes
-
-
-# ========= Core CSV processing =========
 def process_transactions(csv_path: Path):
     df = pd.read_csv(csv_path)
 
@@ -284,6 +257,19 @@ def process_transactions(csv_path: Path):
     total_budget = sum(budgets.get(cat, 0) for cat in budgets)
     total_remaining = total_budget - total_spent
 
+    alerts = []
+    for _, row in summary_current.iterrows():
+        if row["status"] == "Over budget!":
+            alerts.append(
+                f"You have exceeded your budget in {row['category']} "
+                f"(spent ₹{int(row['spent'])} vs budget ₹{int(row['budget'])})."
+            )
+        elif row["status"] == "Almost at limit":
+            alerts.append(
+                f"You are very close to your budget limit in {row['category']} "
+                f"(spent ₹{int(row['spent'])} of ₹{int(row['budget'])})."
+            )
+
     return {
         "df_all": df,
         "df_current": df_current,
@@ -296,21 +282,15 @@ def process_transactions(csv_path: Path):
         "total_spent": total_spent,
         "total_budget": total_budget,
         "total_remaining": total_remaining,
+        "alerts": alerts,
     }
 
 
-# ========= Routes: 3 pages =========
+# ------------ Routes ------------
 
-# --- Page 1: Welcome + Upload ---
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def index():
-    if request.method == "POST" and "file" in request.files:
-        file = request.files.get("file")
-        if not file or file.filename == "":
-            return redirect(url_for("index"))
-        save_path = DATA_DIR / "latest.csv"
-        file.save(save_path)
-        return redirect(url_for("dashboard"))
+    # Just render the welcome + screenshot upload page
     return render_template("index.html")
 
 
@@ -320,17 +300,35 @@ def upload_images():
     if not files or files[0].filename == "":
         return redirect(url_for("index"))
 
-    df = process_image_files(files)
+    try:
+        df = process_image_files(files)
+    except Exception as e:
+        print("OCR error:", e, flush=True)
+        return render_template(
+            "index.html",
+            ocr_error=(
+                "There was an issue running OCR on your screenshots. "
+                "Please try again or check your API key / internet connection."
+            ),
+        )
+
     if df.empty:
-        return redirect(url_for("index"))
+        return render_template(
+            "index.html",
+            ocr_error=(
+                "Could not read any transactions from the screenshots. "
+                "Try a clearer image or a different screenshot."
+            ),
+        )
 
     csv_path = DATA_DIR / "latest.csv"
     df.to_csv(csv_path, index=False)
 
+    session["chat_history"] = []
+
     return redirect(url_for("dashboard"))
 
 
-# --- Page 2: Dashboard ---
 @app.route("/dashboard")
 def dashboard():
     csv_path = DATA_DIR / "latest.csv"
@@ -342,6 +340,7 @@ def dashboard():
     summary_current = result["summary_current"]
     summary_prev = result["summary_prev"]
     budgets = result["budgets"]
+    goals = load_goals()
 
     pie_labels = list(summary_current["category"])
     pie_values = list(summary_current["spent"])
@@ -349,14 +348,11 @@ def dashboard():
     compare_labels = list(summary_current["category"])
     prev_map = {}
     if summary_prev is not None:
-        prev_map = {
-            row["category"]: float(row["spent"]) for _, row in summary_prev.iterrows()
-        }
+        prev_map = {row["category"]: float(row["spent"]) for _, row in summary_prev.iterrows()}
     compare_current = [float(row["spent"]) for _, row in summary_current.iterrows()]
     compare_prev = [prev_map.get(cat, 0.0) for cat in compare_labels]
 
     insights = generate_insights(result)
-    notifications = generate_notifications(summary_current)
 
     return render_template(
         "dashboard.html",
@@ -375,69 +371,74 @@ def dashboard():
         compare_current=compare_current,
         compare_prev=compare_prev,
         insights=insights,
-        notifications=notifications,
+        goals=goals,
+        alerts=result["alerts"],
     )
 
 
-# --- Page 3: AI Assistant ---
 @app.route("/assistant")
 def assistant():
     csv_path = DATA_DIR / "latest.csv"
-    if not csv_path.exists():
-        return redirect(url_for("index"))
-
-    result = process_transactions(csv_path)
-    insights = generate_insights(result)
-    goals = load_goals()
-
+    has_data = csv_path.exists()
     chat_history = session.get("chat_history", [])
+    goals = load_goals()
 
     return render_template(
         "assistant.html",
         chat_history=chat_history,
+        has_data=has_data,
         goals=goals,
-        insights=insights,
     )
 
 
-@app.route("/assistant/ask", methods=["POST"])
-def assistant_ask():
-    message = request.form.get("message", "").strip()
-    if not message:
+@app.route("/ask", methods=["POST"])
+def ask():
+    user_message = request.form.get("message", "").strip()
+    if not user_message:
         return redirect(url_for("assistant"))
 
     csv_path = DATA_DIR / "latest.csv"
     if not csv_path.exists():
-        return redirect(url_for("index"))
+        result = None
+        summary_current = []
+        insights = []
+        suggested_ai = {}
+    else:
+        result = process_transactions(csv_path)
+        summary_current = result["summary_current"].to_dict(orient="records")
+        insights = generate_insights(result)
+        suggested_ai = result["suggested_ai"]
 
-    result = process_transactions(csv_path)
-    insights = generate_insights(result)
-    summary_current = result["summary_current"].to_dict(orient="records")
-    suggested_ai = result["suggested_ai"]
+    goals_existing = load_goals()
 
     system_prompt = f"""
-You are an AI personal finance agent inside a web app.
-You see the user's spending, budgets, insights, and suggested next-month budgets.
+You are an AI personal finance assistant inside a web app.
+You have access to the user's current spending summary, budgets, and AI-predicted budgets.
 
-Data:
+Data you have (may be empty if user hasn't uploaded yet):
 
-1) Current month summary (category, spent, budget, remaining, status):
+1) Current month category summary (list of dicts with keys: category, spent, budget, remaining, status):
 {json.dumps(summary_current, indent=2)}
 
-2) Insights the analytics engine already found:
+2) High-level insights your analysis engine already generated:
 {json.dumps(insights, indent=2)}
 
-3) Suggested budgets for next month:
+3) Predicted budgets for next month (per category):
 {json.dumps(suggested_ai, indent=2)}
 
-You must reply ONLY in valid JSON with two keys:
-- "reply": a clear, friendly natural-language answer for the user.
-- "new_goals": an array of short goal strings to add to the user's goals list (can be empty).
+4) Existing user goals:
+{json.dumps(goals_existing, indent=2)}
 
-Examples of good goals:
-- "Keep dining-out spending under ₹3000 next month"
-- "Save ₹5000 into emergency fund"
-- "Reduce movie spending by 50%"
+You must reply ONLY in valid JSON with this exact structure:
+
+{{
+  "answer": "<natural language answer to the user's question>",
+  "goals": ["<goal 1>", "<goal 2>", "..."]
+}}
+
+- "goals" should be a list of clear, short, actionable goals.
+- If you don't want to add or change any goals, return "goals": [].
+- Do not include any other keys.
 """
 
     try:
@@ -445,61 +446,48 @@ Examples of good goals:
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": message},
+                {"role": "user", "content": user_message},
             ],
             max_tokens=350,
         )
-        raw_content = response.choices[0].message.content
-        parsed = json.loads(raw_content)
-        reply = parsed.get("reply", "Sorry, I had trouble generating a reply.")
-        new_goals = parsed.get("new_goals", [])
+        raw_reply = response.choices[0].message.content
     except Exception as e:
-        reply = (
-            "I had an issue understanding that or contacting the AI service. "
-            "Please try again in a moment."
-        )
+        print("OpenAI error:", repr(e), flush=True)
+        raw_reply = json.dumps({
+            "answer": (
+                "I had an issue contacting the AI service just now. "
+                "Please check that the API key is valid and try again in a moment."
+            ),
+            "goals": []
+        })
+
+    try:
+        parsed = json.loads(raw_reply)
+        answer = parsed.get("answer", raw_reply)
+        new_goals = parsed.get("goals", [])
+    except Exception:
+        answer = raw_reply
         new_goals = []
 
-    chat_history = session.get("chat_history", [])
-    chat_history.append({"role": "user", "content": message})
-    chat_history.append({"role": "assistant", "content": reply})
-    session["chat_history"] = chat_history
-
     if new_goals:
-        goals = load_goals()
+        combined = goals_existing[:]
         for g in new_goals:
-            goals.append({"text": g, "status": "active"})
-        save_goals(goals)
+            if g and g not in combined:
+                combined.append(g)
+        save_goals(combined)
+
+    history = session.get("chat_history", [])
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": answer})
+    history = history[-20:]
+    session["chat_history"] = history
 
     return redirect(url_for("assistant"))
 
 
-@app.route("/assistant/goals/add", methods=["POST"])
-def add_goal():
-    text = request.form.get("goal_text", "").strip()
-    if not text:
-        return redirect(url_for("assistant"))
-    goals = load_goals()
-    goals.append({"text": text, "status": "active"})
-    save_goals(goals)
-    return redirect(url_for("assistant"))
-
-
-@app.route("/assistant/goals/toggle", methods=["POST"])
-def toggle_goal():
-    index = int(request.form.get("index", -1))
-    goals = load_goals()
-    if 0 <= index < len(goals):
-        goals[index]["status"] = (
-            "done" if goals[index]["status"] == "active" else "active"
-        )
-        save_goals(goals)
-    return redirect(url_for("assistant"))
-
-
-@app.route("/assistant/goals/clear", methods=["POST"])
-def clear_goals():
-    save_goals([])
+@app.route("/clear-chat")
+def clear_chat():
+    session["chat_history"] = []
     return redirect(url_for("assistant"))
 
 
