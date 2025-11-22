@@ -1,3 +1,10 @@
+import os
+import json
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+from dotenv import load_dotenv
 from flask import (
     Flask,
     render_template,
@@ -5,526 +12,519 @@ from flask import (
     redirect,
     url_for,
     session,
+    flash,
 )
-import json
-from pathlib import Path
-import os
-
-import pandas as pd
-from sklearn.linear_model import LinearRegression
+from openai import OpenAI
 
 from ocr import process_image_files  # OpenAI Vision OCR
 
-from openai import OpenAI
-from dotenv import load_dotenv
-
-# ------------ Setup ------------
-
+# =========================
+# Setup
+# =========================
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key-change-this"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "super-secret-key-change-me")
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
+TX_CSV_PATH = DATA_DIR / "transactions.csv"
+GOALS_JSON_PATH = DATA_DIR / "goals.json"
 
-BUDGETS_PATH = BASE_DIR / "budgets.json"
-GOALS_PATH = BASE_DIR / "goals.json"
+# =========================
+# Helpers
+# =========================
+
+def default_budgets():
+    # Adjust if you changed categories in your UI
+    return {
+        "Rent": 30000,
+        "Groceries": 15000,
+        "Food Delivery": 5000,
+        "Shopping": 5000,
+        "Transport": 3000,
+        "Other": 5000,
+    }
 
 
-# ------------ Helpers ------------
+def load_transactions_df() -> pd.DataFrame:
+    """Load all transactions from CSV if exists."""
+    if TX_CSV_PATH.exists():
+        df = pd.read_csv(TX_CSV_PATH)
+        # Ensure expected columns
+        for col in ["date", "description", "amount", "type"]:
+            if col not in df.columns:
+                return pd.DataFrame(columns=["date", "description", "amount", "type"])
+        # Parse dates
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+        df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
+        df["type"] = df["type"].fillna("debit")
+        return df
+    return pd.DataFrame(columns=["date", "description", "amount", "type"])
 
-def load_budgets():
-    with open(BUDGETS_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+
+def save_transactions_df(df: pd.DataFrame):
+    """Save all transactions to CSV."""
+    df.to_csv(TX_CSV_PATH, index=False)
 
 
 def load_goals():
-    if not GOALS_PATH.exists():
-        return []
-    with open(GOALS_PATH, "r", encoding="utf-8") as f:
+    if GOALS_JSON_PATH.exists():
         try:
-            return json.load(f)
+            with open(GOALS_JSON_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
             return []
+    return []
 
 
-def save_goals(goals):
-    with open(GOALS_PATH, "w", encoding="utf-8") as f:
-        json.dump(goals, f, indent=2)
+def save_goals(goals_list):
+    with open(GOALS_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(goals_list, f, ensure_ascii=False, indent=2)
 
 
-def _normalize_desc(text: str):
-    text = str(text).lower()
-    squished = "".join(ch for ch in text if ch.isalnum())
-    return text, squished
+def categorize(description: str) -> str:
+    """Simple rule-based category mapping based on description keywords."""
+    if not isinstance(description, str):
+        description = str(description or "").lower()
+    else:
+        description = description.lower()
 
-
-def categorize_transaction(description: str):
-    """
-    Map bank SMS text -> category.
-    Improved so that DMart, Swiggy, Domino's etc are recognised.
-    """
-    desc, squished = _normalize_desc(description)
-
-    # Rent
-    if "rent" in desc:
+    if "rent" in description or "pg" in description:
         return "Rent"
-
-    # Groceries / supermarkets
-    grocery_keywords = [
-        "grocery", "groceries",
-        "dmart", "d mart", "big bazaar", "bigbazaar",
-        "supermarket", "more supermarket", "reliance fresh", "hypercity",
-    ]
-    if any(k in desc for k in grocery_keywords) or "dmart" in squished:
+    if "dmart" in description or "grocery" in description or "supermarket" in description:
         return "Groceries"
-
-    # Movies / entertainment
-    if any(k in desc for k in ["inox", "pvr", "movie", "cinema", "bookmyshow", "bms"]):
-        return "Movies"
-
-    # Food delivery / restaurants
-    dining_keywords = [
-        "swiggy", "zomato", "dominos", "domino's",
-        "pizza hut", "burger king", "mcdonald", "restaurant", "cafe", "eatery",
-    ]
-    if any(k in desc for k in dining_keywords):
-        return "Dining Out"
-
-    # Shopping / e-commerce
-    shopping_keywords = [
-        "amazon", "flipkart", "myntra", "ajio", "nykaa",
-        "zara", "hm", "lifestyle", "shoppers stop", "reliance trends",
-    ]
-    if any(k in desc for k in shopping_keywords):
+    if "swiggy" in description or "zomato" in description or "dominos" in description or "pizza" in description:
+        return "Food Delivery"
+    if "myntra" in description or "ajio" in description or "nykaa" in description or "shopping" in description:
         return "Shopping"
+    if "uber" in description or "ola" in description or "rapido" in description or "bus" in description or "metro" in description:
+        return "Transport"
+    return "Other"
 
-    return "Miscellaneous"
 
+def build_month_comparison(transactions_df: pd.DataFrame):
+    """
+    Build data for 'current vs last month' bar chart.
 
-def suggest_budgets_ai(df_all: pd.DataFrame, budgets: dict):
-    df = df_all.copy()
+    Returns:
+      current_month_label (str),
+      compare_labels (categories),
+      compare_current (list[float]),
+      compare_prev (list[float]),
+      prev_month_exists (bool),
+      demo_prev (bool: True if last month is simulated)
+    """
+    if transactions_df.empty:
+        return "No data", [], [], [], False, False
 
-    if "date" not in df.columns:
-        return {}
+    df = transactions_df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    if df.empty:
+        return "No data", [], [], [], False, False
 
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    if df["date"].notna().sum() == 0:
-        return {}
+    df["month"] = df["date"].dt.to_period("M").astype(str)
 
-    df["year_month"] = df["date"].dt.to_period("M").astype(str)
-    monthly = (
-        df.groupby(["year_month", "category"])["amount"]
+    monthly_cat = (
+        df.groupby(["month", "category"])["amount"]
         .sum()
-        .reset_index()
-        .rename(columns={"amount": "spent"})
+        .unstack(fill_value=0)
     )
 
+    months = sorted(monthly_cat.index)
+    demo_prev = False
+
+    if len(months) >= 2:
+        # Real previous month exists
+        current_month = months[-1]
+        prev_month = months[-2]
+        prev_month_exists = True
+        compare_labels = list(monthly_cat.columns)
+        compare_current = monthly_cat.loc[current_month].round(2).tolist()
+        compare_prev = monthly_cat.loc[prev_month].round(2).tolist()
+    else:
+        # Only one real month ⇒ simulate previous month at 80%
+        current_month = months[0]
+        prev_month_exists = False
+        demo_prev = True
+        compare_labels = list(monthly_cat.columns)
+        compare_current = monthly_cat.loc[current_month].round(2).tolist()
+        compare_prev = [round(x * 0.8, 2) for x in compare_current]
+
+    return current_month, compare_labels, compare_current, compare_prev, prev_month_exists, demo_prev
+
+
+def build_ai_suggested_budgets(transactions_df: pd.DataFrame):
+    """
+    Very simple "AI-ish" suggestion:
+    - Group by month & category.
+    - For each category, take the last month spend and add 10% buffer.
+    - If only one month, use that +10%.
+    """
+    if transactions_df.empty:
+        return {}
+
+    df = transactions_df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    if df.empty:
+        return {}
+
+    df["month"] = df["date"].dt.to_period("M").astype(str)
+    monthly_cat = (
+        df.groupby(["month", "category"])["amount"]
+        .sum()
+        .unstack(fill_value=0)
+    )
+    if monthly_cat.empty:
+        return {}
+
+    last_month = sorted(monthly_cat.index)[-1]
+    last_row = monthly_cat.loc[last_month]
+
     suggested = {}
-
-    for cat in monthly["category"].unique():
-        cat_history = monthly[monthly["category"] == cat].sort_values("year_month")
-        if len(cat_history) >= 3:
-            X = [[i] for i in range(len(cat_history))]
-            y = cat_history["spent"].values
-            model = LinearRegression()
-            model.fit(X, y)
-            next_idx = [[len(cat_history)]]
-            predicted = float(model.predict(next_idx)[0])
-            predicted = max(predicted, 0.0)
-            suggested_budget = round(predicted * 1.1)
-        else:
-            latest_spent = float(cat_history["spent"].iloc[-1])
-            current_budget = float(budgets.get(cat, 0))
-            suggested_budget = round(max(current_budget, latest_spent * 1.1))
-
-        suggested[cat] = suggested_budget
-
-    for cat in df["category"].unique():
-        if cat not in suggested:
-            spent_total = float(df[df["category"] == cat]["amount"].sum())
-            if spent_total > 0:
-                suggested[cat] = round(spent_total * 1.1)
+    for cat, val in last_row.items():
+        # add 10% buffer
+        suggested[cat] = float(round(val * 1.1, 2))
 
     return suggested
 
 
-def generate_insights(result):
-    summary_current = result["summary_current"]
-    summary_prev = result["summary_prev"]
-
-    insights = []
-
-    overspent = summary_current[summary_current["spent"] > summary_current["budget"]]
-    if not overspent.empty:
-        cats = ", ".join(overspent["category"])
-        insights.append(
-            f"You are currently over budget in: {cats}. "
-            f"Try reducing discretionary spend here or increasing the budget if these are essentials."
-        )
-    else:
-        insights.append(
-            "You are within budget in all configured categories right now. "
-            "Nice control over your spending!"
-        )
-
-    almost = summary_current[
-        (summary_current["budget"] > 0)
-        & (summary_current["spent"] / summary_current["budget"] >= 0.9)
-        & (summary_current["spent"] <= summary_current["budget"])
-    ]
-    if not almost.empty:
-        names = ", ".join(almost["category"])
-        insights.append(
-            f"You're very close to your budget limit for: {names}. "
-            f"Be extra careful with these for the rest of the month."
-        )
-
-    if not summary_current.empty:
-        top_row = summary_current.sort_values("spent", ascending=False).iloc[0]
-        insights.append(
-            f"Your biggest spending category this period is {top_row['category']} "
-            f"at roughly ₹{int(top_row['spent'])}."
-        )
-
-    if summary_prev is not None and not summary_prev.empty:
-        merged = summary_current.merge(
-            summary_prev,
-            on="category",
-            how="left",
-            suffixes=("_current", "_prev"),
-        )
-        merged["spent_prev"] = merged["spent_prev"].fillna(0)
-        merged["delta"] = merged["spent_current"] - merged["spent_prev"]
-        most_increased = merged.sort_values("delta", ascending=False).iloc[0]
-        if most_increased["delta"] > 0:
-            insights.append(
-                f"Compared to {result['prev_month']}, your spending in {most_increased['category']} "
-                f"increased by about ₹{int(most_increased['delta'])}."
-            )
-
-    return insights
+def extract_goals_from_text(text: str):
+    """
+    Very simple heuristic: any line that starts with 'Goal:' will be stored.
+    """
+    goals = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.lower().startswith("goal:"):
+            goals.append(line[5:].strip())
+    return goals
 
 
-def process_transactions(csv_path: Path):
-    df = pd.read_csv(csv_path)
+# =========================
+# Routes
+# =========================
 
-    if "description" not in df.columns:
-        df["description"] = ""
-    df["description"] = df["description"].fillna("").astype(str)
-
-    if "amount" not in df.columns:
-        raise ValueError("CSV must have an 'amount' column.")
-    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
-
-    df["category"] = df["description"].apply(categorize_transaction)
-
-    if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        if df["date"].notna().sum() == 0:
-            df["date"] = pd.NaT
-    else:
-        df["date"] = pd.NaT
-
-    df["year_month"] = df["date"].dt.to_period("M").astype(str)
-    if df["year_month"].isna().all():
-        df["year_month"] = "Current"
-
-    months = sorted(df["year_month"].unique())
-    current_month = months[-1]
-    prev_month = months[-2] if len(months) > 1 else None
-
-    df_current = df[df["year_month"] == current_month].copy()
-    df_prev = df[df["year_month"] == prev_month].copy() if prev_month else None
-
-    budgets = load_budgets()
-
-    summary_current = (
-        df_current.groupby("category")["amount"]
-        .sum()
-        .reset_index()
-        .rename(columns={"amount": "spent"})
-    )
-    summary_current["budget"] = summary_current["category"].map(budgets).fillna(0)
-    summary_current["remaining"] = summary_current["budget"] - summary_current["spent"]
-
-    def status_row(row):
-        if row["budget"] == 0:
-            return "No budget set"
-        ratio = row["spent"] / row["budget"] if row["budget"] > 0 else 0
-        if ratio >= 1.0:
-            return "Over budget!"
-        elif ratio >= 0.9:
-            return "Almost at limit"
-        else:
-            return "OK"
-
-    summary_current["status"] = summary_current.apply(status_row, axis=1)
-
-    summary_prev = None
-    if df_prev is not None and not df_prev.empty:
-        summary_prev = (
-            df_prev.groupby("category")["amount"]
-            .sum()
-            .reset_index()
-            .rename(columns={"amount": "spent"})
-        )
-
-    suggested_ai = suggest_budgets_ai(df, budgets)
-
-    total_spent = float(summary_current["spent"].sum())
-    total_budget = sum(budgets.get(cat, 0) for cat in budgets)
-    total_remaining = total_budget - total_spent
-
-    alerts = []
-    for _, row in summary_current.iterrows():
-        if row["status"] == "Over budget!":
-            alerts.append(
-                f"You have exceeded your budget in {row['category']} "
-                f"(spent ₹{int(row['spent'])} vs budget ₹{int(row['budget'])})."
-            )
-        elif row["status"] == "Almost at limit":
-            alerts.append(
-                f"You are very close to your budget limit in {row['category']} "
-                f"(spent ₹{int(row['spent'])} of ₹{int(row['budget'])})."
-            )
-
-    return {
-        "df_all": df,
-        "df_current": df_current,
-        "summary_current": summary_current,
-        "summary_prev": summary_prev,
-        "budgets": budgets,
-        "suggested_ai": suggested_ai,
-        "current_month": current_month,
-        "prev_month": prev_month,
-        "total_spent": total_spent,
-        "total_budget": total_budget,
-        "total_remaining": total_remaining,
-        "alerts": alerts,
-    }
-
-
-# ------------ Routes ------------
-
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def index():
-    return render_template("index.html")
+    """
+    Landing page:
+    - Show project title & team
+    - Let user upload: single screenshot or multiple screenshots
+    - Configure budgets
+    """
+    budgets = session.get("budgets", default_budgets())
+    error_msg = None
 
+    if request.method == "POST":
+        # Budgets from form (if present)
+        new_budgets = {}
+        for key, default_val in default_budgets().items():
+            field_name = f"budget_{key.replace(' ', '_').lower()}"  # e.g. budget_rent
+            try:
+                val = float(request.form.get(field_name, default_val))
+            except (TypeError, ValueError):
+                val = default_val
+            new_budgets[key] = val
+        budgets = new_budgets
+        session["budgets"] = budgets
 
-@app.route("/upload-images", methods=["POST"])
-def upload_images():
-    files = request.files.getlist("images")
-    if not files or files[0].filename == "":
-        return redirect(url_for("index"))
+        # Handle image uploads (single or folder)
+        files = request.files.getlist("images")
+        files = [f for f in files if f and f.filename]
 
-    try:
-        df = process_image_files(files)
-    except Exception as e:
-        print("OCR error:", e, flush=True)
-        return render_template(
-            "index.html",
-            ocr_error=(
-                "There was an issue running OCR on your screenshots. "
-                "Please try again or check your API key / internet connection."
-            ),
-        )
+        if not files:
+            error_msg = "Please upload at least one screenshot."
+        else:
+            # OCR with OpenAI Vision
+            try:
+                df_new = process_image_files(files)
+            except Exception as e:
+                print("OCR error:", repr(e))
+                df_new = pd.DataFrame(columns=["date", "description", "amount", "type"])
 
-    if df.empty or df["amount"].sum() == 0:
-        return render_template(
-            "index.html",
-            ocr_error=(
-                "I couldn't detect any transaction amounts from those screenshots. "
-                "Try a clearer SMS screenshot where the amount is visible."
-            ),
-        )
+            if df_new.empty or df_new["amount"].fillna(0).sum() == 0:
+                error_msg = (
+                    "I couldn't detect any valid transaction amounts from these screenshots. "
+                    "Try a clearer bank/SMS notification screenshot."
+                )
+            else:
+                # Normalize
+                df_new["date"] = pd.to_datetime(df_new["date"], errors="coerce")
+                df_new["amount"] = pd.to_numeric(df_new["amount"], errors="coerce").fillna(0.0)
+                df_new["type"] = df_new["type"].fillna("debit")
 
-    csv_path = DATA_DIR / "latest.csv"
-    df.to_csv(csv_path, index=False)
+                # Append to stored CSV
+                df_existing = load_transactions_df()
+                combined = pd.concat([df_existing, df_new], ignore_index=True)
+                save_transactions_df(combined)
 
-    session["chat_history"] = []
+                flash("Transactions extracted and added to your dashboard.", "success")
+                return redirect(url_for("dashboard"))
 
-    return redirect(url_for("dashboard"))
+    return render_template(
+        "index.html",
+        budgets=budgets,
+        error_msg=error_msg,
+    )
 
 
 @app.route("/dashboard")
 def dashboard():
-    csv_path = DATA_DIR / "latest.csv"
-    if not csv_path.exists():
-        return redirect(url_for("index"))
+    """
+    Dashboard page:
+    - KPIs
+    - Pie (category share)
+    - Bar (current vs last month with demo prev if needed)
+    - Category summary
+    - Suggested budgets
+    - Goals
+    - Transaction table
+    - Notifications (alerts)
+    """
+    budgets = session.get("budgets", default_budgets())
+    df_all = load_transactions_df()
 
-    result = process_transactions(csv_path)
+    if df_all.empty:
+        # No data at all
+        summary = []
+        pie_labels = []
+        pie_values = []
+        suggested_ai = {}
+        alerts = []
+        transactions = []
+        current_month_label = "No data"
+        compare_labels = []
+        compare_current = []
+        compare_prev = []
+        prev_month_exists = False
+        demo_prev = False
+        total_spent = 0
+        total_budget = sum(budgets.values())
+        total_remaining = total_budget
 
-    summary_current = result["summary_current"]
-    summary_prev = result["summary_prev"]
-    budgets = result["budgets"]
+    else:
+        # Categorize all rows
+        df_all["category"] = df_all["description"].apply(categorize)
+
+        # Build current vs last month comparison (uses ALL data)
+        (
+            current_month_label,
+            compare_labels,
+            compare_current,
+            compare_prev,
+            prev_month_exists,
+            demo_prev,
+        ) = build_month_comparison(df_all)
+
+        # Current period = current_month_label
+        df_curr = df_all.copy()
+        if current_month_label != "No data":
+            df_curr["month"] = df_curr["date"].dt.to_period("M").astype(str)
+            df_curr = df_curr[df_curr["month"] == current_month_label]
+
+        # Summary per category for current period
+        if df_curr.empty:
+            cat_spend = {}
+        else:
+            cat_spend = (
+                df_curr.groupby("category")["amount"]
+                .sum()
+                .to_dict()
+            )
+
+        summary = []
+        alerts = []
+        for cat, budget_val in budgets.items():
+            spent = float(cat_spend.get(cat, 0.0))
+            remaining = budget_val - spent
+            if budget_val > 0:
+                pct = (spent / budget_val) * 100
+            else:
+                pct = 0.0
+
+            if spent > budget_val:
+                status = "Over budget!"
+                alerts.append(
+                    f"You exceeded your {cat} budget: spent ₹{spent:.0f} / ₹{budget_val:.0f}."
+                )
+            elif spent >= 0.9 * budget_val:
+                status = "Almost at limit"
+                alerts.append(
+                    f"You're close to your {cat} budget: spent ₹{spent:.0f} / ₹{budget_val:.0f}."
+                )
+            else:
+                status = "On track"
+
+            summary.append(
+                {
+                    "category": cat,
+                    "spent": spent,
+                    "budget": budget_val,
+                    "remaining": remaining,
+                    "pct": pct,
+                    "status": status,
+                }
+            )
+
+        # Total KPIs
+        total_budget = float(sum(budgets.values()))
+        total_spent = float(sum(cat_spend.values()))
+        total_remaining = total_budget - total_spent
+
+        # Pie chart: category share of current period
+        pie_labels = list(cat_spend.keys())
+        pie_values = [float(v) for v in cat_spend.values()]
+
+        # AI suggested budgets
+        suggested_ai = build_ai_suggested_budgets(df_all)
+
+        # Transactions list for current period
+        if df_curr.empty:
+            transactions = []
+        else:
+            transactions = df_curr.sort_values("date", ascending=False).to_dict(orient="records")
+
     goals = load_goals()
-
-    pie_labels = list(summary_current["category"])
-    pie_values = list(summary_current["spent"])
-
-    compare_labels = list(summary_current["category"])
-    prev_map = {}
-    if summary_prev is not None:
-        prev_map = {row["category"]: float(row["spent"]) for _, row in summary_prev.iterrows()}
-    compare_current = [float(row["spent"]) for _, row in summary_current.iterrows()]
-    compare_prev = [prev_map.get(cat, 0.0) for cat in compare_labels]
-
-    insights = generate_insights(result)
 
     return render_template(
         "dashboard.html",
-        transactions=result["df_current"].to_dict(orient="records"),
-        summary=summary_current.to_dict(orient="records"),
-        budgets=budgets,
-        suggested_ai=result["suggested_ai"],
-        current_month=result["current_month"],
-        prev_month=result["prev_month"],
-        total_spent=result["total_spent"],
-        total_budget=result["total_budget"],
-        total_remaining=result["total_remaining"],
+        # KPIs
+        total_budget=total_budget,
+        total_spent=total_spent,
+        total_remaining=total_remaining,
+        # charts
         pie_labels=pie_labels,
         pie_values=pie_values,
         compare_labels=compare_labels,
         compare_current=compare_current,
         compare_prev=compare_prev,
-        insights=insights,
+        # month info
+        current_month=current_month_label,
+        prev_month=prev_month_exists,
+        demo_prev=demo_prev,
+        # tables & lists
+        summary=summary,
+        suggested_ai=suggested_ai,
+        transactions=transactions,
+        alerts=alerts,
         goals=goals,
-        alerts=result["alerts"],
     )
 
 
-@app.route("/assistant")
+@app.route("/assistant", methods=["GET"])
 def assistant():
-    csv_path = DATA_DIR / "latest.csv"
-    has_data = csv_path.exists()
+    """
+    AI assistant page:
+    - Shows chat history
+    - Shows goals
+    """
     chat_history = session.get("chat_history", [])
     goals = load_goals()
-
-    quick_stats = None
-    insights = []
-    if has_data:
-        result = process_transactions(csv_path)
-        quick_stats = {
-            "total_spent": result["total_spent"],
-            "total_budget": result["total_budget"],
-            "total_remaining": result["total_remaining"],
-            "current_month": result["current_month"],
-        }
-        insights = generate_insights(result)[:3]
-
-    return render_template(
-        "assistant.html",
-        chat_history=chat_history,
-        has_data=has_data,
-        goals=goals,
-        quick_stats=quick_stats,
-        insights=insights,
-    )
+    return render_template("assistant.html", chat_history=chat_history, goals=goals)
 
 
 @app.route("/ask", methods=["POST"])
 def ask():
-    user_message = request.form.get("message", "").strip()
-    if not user_message:
+    """
+    Handle AI assistant question.
+    """
+    user_msg = request.form.get("message", "").strip()
+    if not user_msg:
         return redirect(url_for("assistant"))
 
-    csv_path = DATA_DIR / "latest.csv"
-    if not csv_path.exists():
-        result = None
-        summary_current = []
-        insights = []
-        suggested_ai = {}
-    else:
-        result = process_transactions(csv_path)
-        summary_current = result["summary_current"].to_dict(orient="records")
-        insights = generate_insights(result)
-        suggested_ai = result["suggested_ai"]
+    chat_history = session.get("chat_history", [])
 
-    goals_existing = load_goals()
+    # Build simple context about budgets + latest month spend
+    budgets = session.get("budgets", default_budgets())
+    df_all = load_transactions_df()
+    context_lines = []
 
-    system_prompt = f"""
-You are an AI personal finance assistant inside a web app.
-You have access to the user's current spending summary, budgets, and AI-predicted budgets.
+    if not df_all.empty:
+        df_all["category"] = df_all["description"].apply(categorize)
+        # Use same current_month as dashboard
+        (
+            current_month_label,
+            _cl,
+            _cc,
+            _cp,
+            _prev_exists,
+            _demo_prev,
+        ) = build_month_comparison(df_all)
 
-Data you have (may be empty if user hasn't uploaded yet):
-
-1) Current month category summary (list of dicts with keys: category, spent, budget, remaining, status):
-{json.dumps(summary_current, indent=2)}
-
-2) High-level insights your analysis engine already generated:
-{json.dumps(insights, indent=2)}
-
-3) Predicted budgets for next month (per category):
-{json.dumps(suggested_ai, indent=2)}
-
-4) Existing user goals:
-{json.dumps(goals_existing, indent=2)}
-
-You must reply ONLY in valid JSON with this exact structure:
-
-{{
-  "answer": "<natural language answer to the user's question>",
-  "goals": ["<goal 1>", "<goal 2>", "..."]
-}}
-
-- "goals" should be a list of clear, short, actionable goals.
-- If you don't want to add or change any goals, return "goals": [].
-- Do not include any other keys.
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            max_tokens=350,
+        df_all["month"] = df_all["date"].dt.to_period("M").astype(str)
+        df_curr = df_all[df_all["month"] == current_month_label]
+        cat_spend = (
+            df_curr.groupby("category")["amount"].sum().to_dict()
+            if not df_curr.empty
+            else {}
         )
-        raw_reply = response.choices[0].message.content
-    except Exception as e:
-        print("OpenAI error:", repr(e), flush=True)
-        raw_reply = json.dumps({
-            "answer": (
-                "I had an issue contacting the AI service just now. "
-                "Please check that the API key is valid and try again in a moment."
+        context_lines.append(f"Current month: {current_month_label}")
+        for cat, b in budgets.items():
+            s = float(cat_spend.get(cat, 0.0))
+            context_lines.append(f"{cat}: spent {s:.0f}, budget {b:.0f}")
+    else:
+        context_lines.append("No transactions uploaded yet.")
+
+    context_str = "\n".join(context_lines)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a friendly personal finance assistant for a student project. "
+                "You see approximate category spending and budgets for the current month.\n"
+                "Use this context to answer questions and suggest realistic, safe budget goals.\n"
+                "If you propose concrete goals, prefix them with 'Goal:' on separate lines so they can be saved.\n\n"
+                f"Context:\n{context_str}"
             ),
-            "goals": []
-        })
+        }
+    ]
+
+    # Add previous chat
+    for msg in chat_history:
+        messages.append(
+            {"role": msg["role"], "content": msg["content"]}
+        )
+
+    messages.append({"role": "user", "content": user_msg})
 
     try:
-        parsed = json.loads(raw_reply)
-        answer = parsed.get("answer", raw_reply)
-        new_goals = parsed.get("goals", [])
-    except Exception:
-        answer = raw_reply
-        new_goals = []
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=400,
+        )
+        reply = resp.choices[0].message.content
+    except Exception as e:
+        print("OpenAI error:", repr(e))
+        reply = "I had an issue contacting the AI service. Please try again in a moment."
 
+    # Update chat history
+    chat_history.append({"role": "user", "content": user_msg})
+    chat_history.append({"role": "assistant", "content": reply})
+    session["chat_history"] = chat_history
+
+    # Extract & store goals
+    new_goals = extract_goals_from_text(reply)
     if new_goals:
-        combined = goals_existing[:]
-        for g in new_goals:
-            if g and g not in combined:
-                combined.append(g)
-        save_goals(combined)
-
-    history = session.get("chat_history", [])
-    history.append({"role": "user", "content": user_message})
-    history.append({"role": "assistant", "content": answer})
-    history = history[-20:]
-    session["chat_history"] = history
+        existing = load_goals()
+        merged = existing + [g for g in new_goals if g not in existing]
+        save_goals(merged)
 
     return redirect(url_for("assistant"))
 
 
-@app.route("/clear-chat")
-def clear_chat():
-    session["chat_history"] = []
-    return redirect(url_for("assistant"))
-
+# =========================
+# Main
+# =========================
 
 if __name__ == "__main__":
     app.run(debug=True)
