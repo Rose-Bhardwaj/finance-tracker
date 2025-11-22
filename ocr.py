@@ -37,6 +37,8 @@ Your job is to read the screenshot carefully and extract:
 - amount: numeric value only (float), in INR
 - type: "debit" if money left the user, "credit" if money came to the user
 
+If you truly cannot find a transaction amount (like ₹ or Rs or INR), set amount to 0.
+
 Reply ONLY as valid JSON with this exact schema:
 
 {

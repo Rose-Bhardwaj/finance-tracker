@@ -10,7 +10,7 @@
   <div class="bg-gradient"></div>
 
   <div class="app-shell">
-    <nav class="navbar glass">
+    <nav class="navbar glass slide-down">
       <div class="navbar-left">
         <span class="logo">₹ Personal Finance Tracker</span>
       </div>
@@ -22,12 +22,13 @@
       </div>
     </nav>
 
-    <main class="page glass">
+    <main class="page glass fade-in">
       {% block content %}{% endblock %}
     </main>
   </div>
 
   <script>
+    // Dark / light theme toggle
     const root = document.documentElement;
     const toggle = document.getElementById("theme-toggle");
     const savedTheme = localStorage.getItem("pf-theme");

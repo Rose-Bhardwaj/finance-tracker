@@ -31,17 +31,17 @@
 {% endif %}
 
 <section class="kpi-row">
-  <div class="kpi-card">
+  <div class="kpi-card pop-in">
     <span class="kpi-label">Total Budget</span>
     <span class="kpi-value">₹{{ "%.0f" | format(total_budget) }}</span>
     <p class="kpi-caption">Sum of all category budgets configured.</p>
   </div>
-  <div class="kpi-card">
+  <div class="kpi-card pop-in delay-1">
     <span class="kpi-label">Spent This Period</span>
     <span class="kpi-value">₹{{ "%.0f" | format(total_spent) }}</span>
     <p class="kpi-caption">Total debits detected from your statements.</p>
   </div>
-  <div class="kpi-card">
+  <div class="kpi-card pop-in delay-2">
     <span class="kpi-label">Remaining</span>
     <span class="kpi-value {% if total_remaining < 0 %}negative{% endif %}">
       ₹{{ "%.0f" | format(total_remaining) }}
@@ -57,12 +57,12 @@
 </section>
 
 <section class="chart-row">
-  <div class="chart-card">
+  <div class="chart-card slide-up">
     <h2>Category Share</h2>
     <p class="small">See where most of your money is going this month.</p>
     <canvas id="pieChart"></canvas>
   </div>
-  <div class="chart-card">
+  <div class="chart-card slide-up delay-1">
     <h2>Current vs Last Month</h2>
     <p class="small">Watch how your spending changes over time.</p>
     <canvas id="compareChart"></canvas>

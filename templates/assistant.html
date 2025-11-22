@@ -10,58 +10,13 @@
     {% if not has_data %}
       <p class="small">
         You haven't uploaded any data yet. I can still help with generic advice,
-        but for personalised answers, upload CSV/screenshots from the Home page.
+        but for personalised answers, upload screenshots from the Home page.
       </p>
     {% endif %}
   </div>
 </section>
 
 <section class="assistant-layout">
-  <div class="assistant-main">
-    <div class="chat-container">
-      <div class="chat-header">
-        <span>Smart Budget Chat</span>
-        <button id="chat-toggle" type="button">Collapse</button>
-      </div>
-
-      <div id="chat-body" class="chat-body">
-        {% if chat_history %}
-          {% for msg in chat_history %}
-            <div class="chat-bubble {{ 'user' if msg.role == 'user' else 'bot' }}">
-              {% if msg.role == 'user' %}
-                <strong>You:</strong> {{ msg.content }}
-              {% else %}
-                <strong>Assistant:</strong> <span class="bot-text">{{ msg.content }}</span>
-              {% endif %}
-            </div>
-          {% endfor %}
-        {% else %}
-          <div class="chat-bubble bot">
-            <strong>Assistant:</strong>
-            <span class="bot-text">
-              Hi! Ask me things like “How much did I spend on groceries?”,
-              “Which categories am I overspending in?” or
-              “Suggest a budget plan and goals for next month.”
-            </span>
-          </div>
-        {% endif %}
-      </div>
-
-      <form action="{{ url_for('ask') }}" method="post" class="chat-form">
-        <textarea
-          name="message"
-          class="chat-input"
-          placeholder="Type your question here..."
-          required
-        ></textarea>
-        <div class="chat-actions">
-          <button type="submit">Ask</button>
-          <a href="{{ url_for('clear_chat') }}" class="btn-link small">Clear chat</a>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <div class="assistant-side card">
     <h2>Goals Panel</h2>
     <p class="small">
@@ -79,6 +34,52 @@
   </div>
 </section>
 
+<!-- Floating chat panel -->
+<div class="chat-floating">
+  <div class="chat-container glass">
+    <div class="chat-header">
+      <span>Smart Budget Chat</span>
+      <button id="chat-toggle" type="button">Collapse</button>
+    </div>
+
+    <div id="chat-body" class="chat-body">
+      {% if chat_history %}
+        {% for msg in chat_history %}
+          <div class="chat-bubble {{ 'user' if msg.role == 'user' else 'bot' }}">
+            {% if msg.role == 'user' %}
+              <strong>You:</strong> {{ msg.content }}
+            {% else %}
+              <strong>Assistant:</strong> <span class="bot-text">{{ msg.content }}</span>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="chat-bubble bot">
+          <strong>Assistant:</strong>
+          <span class="bot-text">
+            Hi! Ask me things like “How much did I spend on groceries?”,
+            “Which categories am I overspending in?” or
+            “Suggest a budget plan and goals for next month.”
+          </span>
+        </div>
+      {% endif %}
+    </div>
+
+    <form action="{{ url_for('ask') }}" method="post" class="chat-form">
+      <textarea
+        name="message"
+        class="chat-input"
+        placeholder="Type your question here..."
+        required
+      ></textarea>
+      <div class="chat-actions">
+        <button type="submit">Ask</button>
+        <a href="{{ url_for('clear_chat') }}" class="btn-link small">Clear chat</a>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
   const chatBody = document.getElementById("chat-body");
   if (chatBody) {
@@ -91,6 +92,7 @@
     chatToggle.textContent = chatBody.classList.contains("collapsed") ? "Expand" : "Collapse";
   });
 
+  // typing animation for the latest bot message
   const botTexts = document.querySelectorAll(".chat-bubble.bot .bot-text");
   if (botTexts.length > 0) {
     const last = botTexts[botTexts.length - 1];

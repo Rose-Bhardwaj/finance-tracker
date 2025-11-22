@@ -186,12 +186,7 @@ def process_transactions(csv_path: Path):
     df = pd.read_csv(csv_path)
 
     if "description" not in df.columns:
-        if "merchant" in df.columns:
-            df["description"] = df["merchant"].fillna("").astype(str)
-        elif "raw_text" in df.columns:
-            df["description"] = df["raw_text"].fillna("").astype(str)
-        else:
-            df["description"] = ""
+        df["description"] = ""
     df["description"] = df["description"].fillna("").astype(str)
 
     if "amount" not in df.columns:
@@ -302,6 +297,7 @@ def upload_images():
 
     try:
         df = process_image_files(files)
+        print("OCR DataFrame:", df)
     except Exception as e:
         print("OCR error:", e, flush=True)
         return render_template(
@@ -312,12 +308,12 @@ def upload_images():
             ),
         )
 
-    if df.empty:
+    if df.empty or df["amount"].sum() == 0:
         return render_template(
             "index.html",
             ocr_error=(
-                "Could not read any transactions from the screenshots. "
-                "Try a clearer image or a different screenshot."
+                "I couldn't detect any transaction amounts from those screenshots. "
+                "Try a clearer SMS screenshot where the amount is visible."
             ),
         )
 
