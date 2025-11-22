@@ -9,11 +9,10 @@ from flask import (
 import json
 from pathlib import Path
 import os
-
+import base64
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-
-from ocr import process_image_files  # OpenAI Vision OCR
+  # OpenAI Vision OCR
 
 from openai import OpenAI
 from dotenv import load_dotenv
