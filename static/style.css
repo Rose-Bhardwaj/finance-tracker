@@ -691,3 +691,125 @@ tr.warning {
   color: #9ca3af;
   text-decoration: underline;
 }
+
+/* === Voice / mic styles ====================================== */
+
+.mic-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
+.mic-btn .mic-icon {
+  font-size: 16px;
+}
+
+.mic-btn .mic-pulse {
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 2px solid rgba(56, 189, 248, 0.0);
+  pointer-events: none;
+  transition: border-color 0.2s ease;
+}
+
+.mic-btn.listening {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.6);
+}
+
+.mic-btn.listening .mic-pulse {
+  border-color: rgba(56, 189, 248, 0.7);
+  animation: mic-pulse 1.2s ease-out infinite;
+}
+
+@keyframes mic-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+/* Chat body collapse behaviour */
+.chat-body {
+  max-height: 420px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.25s ease;
+}
+
+.chat-body.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Scrollable chat area */
+.chat-messages {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Keep each message separate and preserve line breaks */
+.chat-bubble {
+  margin-bottom: 8px;
+}
+
+.bubble-text {
+  white-space: pre-wrap; /* keeps newlines from the assistant so replies don't look "combined" */
+}
+
+/* =========================
+   Chat bubbles styling
+   ========================= */
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;             /* space between bubbles */
+}
+
+/* Base bubble style */
+.chat-bubble {
+  max-width: 760px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* User message bubble (right side, bright gradient) */
+.chat-bubble.from-user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #f9fafb;
+}
+
+/* Assistant message bubble (left side, darker card) */
+.chat-bubble.from-assistant {
+  align-self: flex-start;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  color: #e5e7eb;
+}
+
+/* Label (“You:” / “Assistant:”) above the text */
+.bubble-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+
+/* Keep line breaks so long answers don’t look like a single line */
+.bubble-text {
+  white-space: pre-wrap;
+}

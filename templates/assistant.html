@@ -1,31 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="assistant-layout">
-  <!-- LEFT COLUMN: TEXT + GOALS -->
-  <div class="assistant-left">
+<div class="page-header-row">
+  <div>
     <h1>AI Finance Assistant</h1>
-    <p class="assistant-sub">
+    <p class="hero-sub">
       Ask anything about your spending, budgets or goals. I’ll answer using your real data.
     </p>
+  </div>
+</div>
 
-    <section class="assistant-panel">
+<div class="assistant-layout">
+  <!-- LEFT COLUMN: SNAPSHOT + GOALS -->
+  <div class="assistant-side">
+    <section class="card">
       <h2>Spending Snapshot</h2>
-      <p>
-        Once you upload screenshots and view the dashboard, I’ll show a quick summary of your
-        spending here so you can see the numbers while chatting.
-      </p>
       <p class="small">
-        Tip: Try questions like <em>“How much did I spend on groceries this month?”</em> or
-        <em>“Which categories am I overspending in?”</em>.
+        Once you upload screenshots and view the dashboard, I’ll show a quick summary of your spending here
+        so you can see the numbers while chatting.
       </p>
+
+      {% if chat_history and chat_history|length > 0 %}
+        <div class="snapshot-box">
+          <p class="small">
+            Tip: Try asking, <em>“Which categories am I overspending in?”</em> or
+            <em>“What should my budget be next month?”</em>
+          </p>
+        </div>
+      {% else %}
+        <p class="small">
+          You haven’t uploaded any data yet. I can still help with generic advice, but for personalised answers,
+          upload screenshots from the Home page.
+        </p>
+      {% endif %}
     </section>
 
-    <section class="assistant-panel">
+    <section class="card">
       <h2>Goals Panel</h2>
-      <p>
-        Whenever the assistant suggests new goals, they will be saved here automatically.
-        Ask something like <em>“Set savings goals for next month”</em>.
+      <p class="small">
+        Whenever the assistant suggests new goals (lines starting with <strong>“Goal:”</strong>), they’ll be saved here
+        automatically.
       </p>
 
       {% if goals and goals|length > 0 %}
@@ -40,48 +54,65 @@
     </section>
   </div>
 
-  <!-- RIGHT COLUMN: CHAT CARD -->
-  <div class="assistant-right">
-    <div class="chat-card" id="chatCard">
-      <div class="chat-card-header">
-        <h2>Smart Budget Chat</h2>
-        <button type="button" id="chatToggleBtn" class="pill-btn">Collapse</button>
+  <!-- RIGHT COLUMN: CHAT -->
+  <div class="assistant-chat-column">
+    <div class="card chat-shell">
+      <div class="chat-header">
+        <div>
+          <h2 class="chat-title">Smart Budget Chat</h2>
+          <p class="small">
+            Ask me things like “How much did I spend on groceries?”, “Which categories am I overspending in?” or
+            “Suggest a budget plan and goals for next month.”
+          </p>
+        </div>
+        <button id="chat-toggle" type="button" class="pill-btn">
+          <span id="chat-toggle-label">Expand</span>
+        </button>
       </div>
 
-      <div class="chat-card-body">
-        <div class="chat-history">
-          {% if not chat_history %}
-            <div class="msg assistant-msg">
-              <strong>Assistant:</strong>
-              Hi! Ask me things like “How much did I spend on groceries?”, “Which categories am I
-              overspending in?” or “Suggest a budget plan and goals for next month.”
-            </div>
-          {% else %}
-            {% for m in chat_history %}
-              {% if m.role == 'user' %}
-                <div class="msg user-msg">
-                  <strong>You:</strong> {{ m.content }}
-                </div>
-              {% else %}
-                <div class="msg assistant-msg">
-                  <strong>Assistant:</strong> {{ m.content }}
-                </div>
-              {% endif %}
+      <!-- start collapsed by default -->
+      <div id="chat-body" class="chat-body is-collapsed">
+        <div class="chat-messages" id="chat-messages">
+          {% if chat_history and chat_history|length > 0 %}
+            {% for msg in chat_history %}
+              <div class="chat-bubble {{ 'from-user' if msg.role == 'user' else 'from-assistant' }}">
+                <span class="bubble-label">
+                  {{ 'You' if msg.role == 'user' else 'Assistant' }}:
+                </span>
+                <span class="bubble-text">{{ msg.content }}</span>
+              </div>
             {% endfor %}
+          {% else %}
+            <div class="chat-bubble from-assistant">
+              <span class="bubble-label">Assistant:</span>
+              <span class="bubble-text">
+                Hi! Ask me things like “How much did I spend on groceries?”, “Which categories am I
+                overspending in?” or “Suggest a budget plan and goals for next month.”
+              </span>
+            </div>
           {% endif %}
         </div>
 
-        <form action="{{ url_for('ask') }}" method="post" class="chat-input-row">
+        <form class="chat-input-row" method="post" action="{{ url_for('ask') }}">
           <textarea
             name="message"
+            id="chat-input"
             rows="3"
-            placeholder="Type your question here..."
+            placeholder="Type your question here or use the mic to speak…"
             required
           ></textarea>
 
           <div class="chat-actions">
-            <button type="submit" class="btn-primary">Ask</button>
-            <a href="{{ url_for('clear_chat') }}" class="link-button">Clear chat</a>
+            <!-- Mic button (voice input) -->
+            <button type="button" id="mic-button" class="btn secondary mic-btn" title="Speak instead of typing">
+              <span class="mic-icon">🎙️</span>
+              <span class="mic-label">Speak</span>
+              <span class="mic-pulse"></span>
+            </button>
+
+            <!-- Ask + clear -->
+            <button type="submit" class="btn primary">Ask</button>
+            <a href="{{ url_for('clear_chat') }}" class="link-clear">Clear chat</a>
           </div>
         </form>
       </div>
@@ -89,23 +120,117 @@
   </div>
 </div>
 
-{% block extra_scripts %}
-<script>
-  document.addEventListener("DOMContentLoaded", () => {
-    const chatCard = document.getElementById("chatCard");
-    const toggleBtn = document.getElementById("chatToggleBtn");
-
-    if (!chatCard || !toggleBtn) return;
-
-    let collapsed = false;
-
-    toggleBtn.addEventListener("click", () => {
-      collapsed = !collapsed;
-      chatCard.classList.toggle("collapsed", collapsed);
-      toggleBtn.textContent = collapsed ? "Expand" : "Collapse";
-    });
-  });
-</script>
 {% endblock %}
 
+{% block extra_scripts %}
+<script>
+  // =========================
+  // Expand / collapse chat body
+  // =========================
+  (function () {
+    const toggleBtn = document.getElementById('chat-toggle');
+    const toggleLabel = document.getElementById('chat-toggle-label');
+    const chatBody = document.getElementById('chat-body');
+    const chatMessages = document.getElementById('chat-messages');
+
+    if (!toggleBtn || !chatBody) return;
+
+    toggleBtn.addEventListener('click', () => {
+      const isCollapsed = chatBody.classList.toggle('is-collapsed');
+      toggleLabel.textContent = isCollapsed ? 'Expand' : 'Collapse';
+
+      // When expanding, scroll to bottom so latest messages are visible
+      if (!isCollapsed && chatMessages) {
+        setTimeout(() => {
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }, 50);
+      }
+    });
+  })();
+
+  // =========================
+  // Voice input with Web Speech API
+  // (same behaviour as before, just cleaned up a little)
+  // =========================
+  (function () {
+    const micButton = document.getElementById('mic-button');
+    const input = document.getElementById('chat-input');
+
+    if (!micButton || !input) return;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      micButton.style.display = 'none';
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    let listening = false;
+    let finalTranscript = '';
+    let baseText = '';
+
+    function setListening(state) {
+      listening = state;
+      micButton.classList.toggle('listening', state);
+      const labelEl = micButton.querySelector('.mic-label');
+      if (labelEl) {
+        labelEl.textContent = state ? 'Listening…' : 'Speak';
+      }
+    }
+
+    micButton.addEventListener('click', () => {
+      if (!listening) {
+        try {
+          baseText = (input.value || '').trim();
+          finalTranscript = '';
+          recognition.start();
+          setListening(true);
+        } catch (e) {
+          console.log('Speech recognition start error:', e);
+        }
+      } else {
+        recognition.stop();
+        setListening(false);
+      }
+    });
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interim += transcript;
+        }
+      }
+
+      const speechText = (finalTranscript + ' ' + interim).trim();
+      const combined = ((baseText ? baseText + ' ' : '') + speechText).trim();
+      input.value = combined;
+    };
+
+    recognition.onerror = (event) => {
+      console.log('Speech recognition error:', event.error);
+      setListening(false);
+
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        alert(
+          'Microphone access was blocked by your browser.\n\n' +
+          'Please click the lock icon in the address bar and allow microphone access for this site.'
+        );
+      }
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+    };
+  })();
+</script>
 {% endblock %}
